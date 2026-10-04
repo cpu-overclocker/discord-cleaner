@@ -1,6 +1,7 @@
 // ============================================================
-//  Discord — Bulk Friend Remover (v4.7)
+//  Discord — Bulk Friend Remover (v4.8)
 //  + Onglet Historique des suppressions récentes
+//  + Bouton 🧹 Clean DM par ligne (nettoie seulement les DM, ami conservé)
 // ============================================================
 (async () => {
   document.getElementById('__fr_box')?.remove();
@@ -169,9 +170,13 @@
     .map(r => ({ id: r.id, user: r.user, since: r.since ? new Date(r.since) : null, created: createdAt(r.id) }));
 
   const dmChannelByUserId = new Map();
+  const dmLastByUserId = new Map(); // userId -> Date of the last message (from last_message_id, no scraping)
   if (rCh.ok) {
     for (const ch of await rCh.json()) {
-      if (ch.type === 1 && ch.recipients?.[0]) dmChannelByUserId.set(ch.recipients[0].id, ch.id);
+      if (ch.type === 1 && ch.recipients?.[0]) {
+        dmChannelByUserId.set(ch.recipients[0].id, ch.id);
+        if (ch.last_message_id) dmLastByUserId.set(ch.recipients[0].id, createdAt(ch.last_message_id));
+      }
     }
   }
 
@@ -585,12 +590,15 @@
     .fr-actions { display:flex; gap:6px; flex-shrink:0; }
     .fr-dm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; font-family:inherit; }
     .fr-dm:hover { border-color:#5865f2; color:#5865f2; } .fr-dm.loading { opacity:.6; cursor:wait; }
-    .fr-row:hover .fr-dm { border-color:#5865f2; color:#5865f2; }
     .fr-rm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
     .fr-rm:hover { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); }
     .fr-rm.armed { border-color:#da373c; color:#fff; background:#da373c; }
     .fr-rm.loading { opacity:.6; cursor:wait; } .fr-rm.err { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.15); }
-    .fr-row:hover .fr-rm:not(.armed):not(.loading):not(.err) { border-color:#da373c; color:#da373c; }
+    .fr-cl { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
+    .fr-cl:hover { border-color:#5865f2; color:#5865f2; background:rgba(88,101,242,.08); }
+    .fr-cl.armed { border-color:#5865f2; color:#fff; background:#5865f2; }
+    .fr-cl.loading { opacity:.6; cursor:wait; }
+
     .fr-foot { padding:10px 16px; border-top:1px solid #1e1f22; display:flex; align-items:center; gap:10px; flex-shrink:0; flex-wrap:wrap; }
     .fr-status { flex:1; font-size:12px; color:#b5bac1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:120px; }
     .fr-footbar { width:100%; height:4px; background:#1e1f22; border-radius:99px; overflow:hidden; margin-top:4px; display:none; }
@@ -632,6 +640,7 @@
             <option value="added">Date added</option>
             <option value="name">Name</option>
             <option value="created">Account created</option>
+            <option value="lastdm">Last DM</option>
           </select>
           <button class="fr-btn" id="fr-dir" style="min-width:32px;font-size:14px;padding:4px 8px">↓</button>
           <label style="cursor:pointer;font-size:12px;color:#dbdee1;background:#1e1f22;border:1px solid #2b2d31;border-radius:4px;padding:5px 8px">
@@ -778,6 +787,7 @@
     const val = {
       added: f => f.since?.getTime() ?? (m === 1 ? Infinity : -Infinity),
       created: f => f.created.getTime(),
+      lastdm: f => dmLastByUserId.get(f.user.id)?.getTime() ?? (m === 1 ? Infinity : -Infinity),
     };
     l.sort((a, b) => key === 'name'
       ? m * displayName(a.user).localeCompare(displayName(b.user), undefined, { sensitivity: 'base' })
@@ -795,11 +805,12 @@
       <img class="fr-av" loading="lazy" src="${avatarUrl(u)}" title="View profile">
       <div class="fr-info">
         <div class="fr-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div>
-        <div class="fr-sub">Friends since ${fmtDate(f.since)} (${fmtRelative(f.since)}) · Account created ${fmtDate(f.created)}</div>
+        <div class="fr-sub">Friends since ${fmtDate(f.since)} (${fmtRelative(f.since)}) · Account created ${fmtDate(f.created)}${dmLastByUserId.has(u.id) ? ` · 💬 Last DM ${fmtRelative(dmLastByUserId.get(u.id))}` : ''}</div>
       </div>
       <div class="fr-badges">${badges}</div>
       <div class="fr-actions">
         <button class="fr-dm" title="Send a DM">💬</button>
+        <button class="fr-cl" title="Delete only your messages in this DM (click twice)">🧹 Clean</button>
         <button class="fr-rm" title="Remove this friend (click twice)">🗑 Remove</button>
       </div>
     </div>`;
@@ -1091,6 +1102,44 @@
     }
   }
 
+  // ── Clean ONLY the DM (friend stays) ────────────────────
+  async function cleanOneDM(id, btn) {
+    if (busy) return;
+    const f = friends.find(x => x.id === id);
+    if (!f) return;
+    const name = displayName(f.user);
+
+    busy = true;
+    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
+    updateFooter(`🧹 Cleaning DM with ${name}…`);
+
+    const wasOpen = dmChannelByUserId.has(id);
+    const progress = createProgressOverlay('dm');
+    let res = null;
+    try { res = await cleanDMWithFriend(f, progress); }
+    catch (e) { console.warn('⚠️ cleanDM error:', e); }
+
+    if (res?.skipped) progress.remove();            // nothing to delete → no progress popup
+    else progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
+
+    // DM wasn't open before and we only opened it to look → close it again
+    if (!wasOpen) {
+      const chId = dmChannelByUserId.get(id);
+      if (chId) { await closeDMChannel(chId); dmChannelByUserId.delete(id); }
+    }
+
+    busy = false;
+    if (!box.isConnected) return;
+    if (btn?.isConnected) { btn.classList.remove('loading'); btn.textContent = '🧹 Clean'; }
+
+    let msg;
+    if (res?.cancelled)        msg = `⛔ Clean cancelled for ${name} — ${res.deleted}/${res.total} deleted.`;
+    else if (res?.errors > 0)  msg = `⚠️ ${name}: ${res.deleted}/${res.total} deleted — ${res.errors} error(s) (status ${res.lastErrorStatus}).`;
+    else if (res?.deleted > 0) msg = `✅ ${name}: 🧹 ${res.deleted} message${res.deleted > 1 ? 's' : ''} deleted.`;
+    else                       msg = `ℹ️ ${name}: 0 message sent.`;
+    updateFooter(msg);
+  }
+
   // ── List clicks (friends) ───────────────────────────────
   listEl.addEventListener('click', async e => {
     const row = e.target.closest('.fr-row');
@@ -1108,6 +1157,30 @@
       dmBtn.textContent = '…';
       try { await openDM(id); } catch (err) { console.warn('⚠️ openDM error:', err); }
       setTimeout(() => { if (dmBtn.isConnected) { dmBtn.classList.remove('loading'); dmBtn.textContent = prev; } }, 400);
+      return;
+    }
+
+    const clBtn = e.target.closest('.fr-cl');
+    if (clBtn) {
+      e.stopPropagation();
+      if (clBtn.classList.contains('loading')) return;
+      if (!clBtn.dataset.armed) {
+        clBtn.dataset.armed = '1';
+        clBtn.classList.add('armed');
+        clBtn.textContent = '⚠ sure?';
+        clBtn._timer = setTimeout(() => {
+          if (!clBtn.isConnected) return;
+          delete clBtn.dataset.armed;
+          clBtn.classList.remove('armed');
+          clBtn.textContent = '🧹 Clean';
+        }, 3000);
+        return;
+      }
+      clearTimeout(clBtn._timer);
+      delete clBtn.dataset.armed;
+      clBtn.classList.remove('armed');
+      clBtn.textContent = '🧹 Clean';
+      await cleanOneDM(id, clBtn);
       return;
     }
 
@@ -1319,6 +1392,6 @@
   renderHistory();
   $('fr-hcount').textContent = history.length;
 
-  console.log('%c✅ Friend Remover v4.7 ready', 'color:green;font-weight:bold;font-size:16px');
+  console.log('%c✅ Friend Remover v4.8 ready', 'color:green;font-weight:bold;font-size:16px');
   if (history.length > 0) console.log(`📜 ${history.length} entr${history.length > 1 ? 'ies' : 'y'} in history`);
 })().catch(e => console.error('❌', e.message));
