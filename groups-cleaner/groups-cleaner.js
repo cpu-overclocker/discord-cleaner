@@ -597,12 +597,11 @@
     .gl-badge { font-size:11px; padding:1px 5px; border-radius:4px; line-height:1.4; }
     .gl-actions { display:flex; gap:6px; flex-shrink:0; }
     .gl-open { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:700; transition:all .12s; font-family:inherit; }
-    .gl-open:hover, .gl-row:hover .gl-open { border-color:#5865f2; color:#5865f2; }
+    .gl-open:hover { border-color:#5865f2; color:#5865f2; }
     .gl-rm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
     .gl-rm:hover { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); }
     .gl-rm.armed { border-color:#da373c; color:#fff; background:#da373c; }
     .gl-rm.loading { opacity:.6; cursor:wait; } .gl-rm.err { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.15); }
-    .gl-row:hover .gl-rm:not(.armed):not(.loading):not(.err) { border-color:#da373c; color:#da373c; }
     .gl-foot { padding:10px 16px; border-top:1px solid #1e1f22; display:flex; align-items:center; gap:10px; flex-shrink:0; flex-wrap:wrap; }
     .gl-status { flex:1; font-size:12px; color:#b5bac1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:120px; }
     .gl-silent { cursor:pointer; font-size:12px; color:#dbdee1; background:#1e1f22; border:1px solid #2b2d31; border-radius:4px; padding:5px 8px; display:flex; align-items:center; gap:6px; }
