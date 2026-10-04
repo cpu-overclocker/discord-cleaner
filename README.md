@@ -24,7 +24,7 @@ Each tool is standalone. Use only what you need.
 ## Quick start
 
 1. Open <https://discord.com/app>
-2. Open DevTools with `F12`
+2. Open DevTools with `CTRL + Shift + I`
 3. Go to the **Console** tab
 4. Open the tool's `.js` file, copy it, paste it, press Enter
 
