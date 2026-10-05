@@ -49,7 +49,7 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 </td>
 <td width="50%">
 
-### 📜 Universal History
+### 📜 History
 - Logs every friend removed, group left, DM cleaned
 - Search, filter by type, clear all
 - Session-only storage (cleared on page refresh)
@@ -74,10 +74,10 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 ## 🚀 Installation
 
 1. Open **Discord** in your browser → `discord.com/app`
-2. Open the **DevTools Console** (`F12` → Console tab)
+2. Open the **DevTools Console** (`CTRL + SHIFT + I` or `F12` → Console tab)
 3. Copy the entire content of `discord-tools.js`
 4. Paste it into the console and hit **Enter**
-5. The Discord Tools panel appears — enjoy!
+5. The Discord Tools panel appears
 
 > 💡 Tip: you can save the script as a **bookmarklet** or use it via a userscript manager (Tampermonkey, Violentmonkey).
 
