@@ -1,82 +1,127 @@
 <div align="center">
 
-# Discord Cleaner
+# 🛠 Discord Tools
 
-**Three standalone console tools to clean up Discord.**
+**A powerful all-in-one userscript to manage your Discord account.**
+Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 
-[![License](https://img.shields.io/badge/license-MIT-23a55a?style=for-the-badge)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-ff6b6b?style=for-the-badge)](CONTRIBUTING.md)
-
-*No install. No extension. Paste in the console.*
+![Version](https://img.shields.io/badge/version-1.3-5865f2?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Discord%20Web-5865f2?style=flat-square)
+![Language](https://img.shields.io/badge/language-JavaScript-f7df1e?style=flat-square)
 
 </div>
 
-## Tools
+---
 
-| | Tool | What it does |
-|---|---|---|
-| 👥 | **[Friends Cleaner](friends-cleaner/)** | Bulk-remove friends. Filter by date, account age, avatar. |
-| 🚪 | **[Groups Cleaner](groups-cleaner/)** | Leave group DMs. Silent mode. Solo-group detection. |
-| 💬 | **[DM Cleaner](dm-cleaner/)** | Delete every message you sent in a DM. |
+## ✨ Features
 
-Each tool is standalone. Use only what you need.
+<table>
+<tr>
+<td width="50%">
 
-## Quick start
+### 👥 Friends Manager
+- List, search, sort, and filter all your friends
+- Badges for new accounts, fresh friends, long-time friends, no-avatar
+- Remove individually or in bulk
+- Optional: clean your DM messages before removing
+- Optional: auto-close the DM in the sidebar
 
-1. Open <https://discord.com/app>
-2. Open DevTools with `CTRL + Shift + I`
-3. Go to the **Console** tab
-4. Open the tool's `.js` file, copy it, paste it, press Enter
+</td>
+<td width="50%">
 
-> Chrome may ask you to type `allow pasting` on first use. This is a standard anti-self-XSS safeguard. The scripts are open source, read them first.
+### 👥 Groups Manager
+- List all your group DMs
+- Filter by Solo, Named, Inactive, Recent, Old
+- Leave individually or in bulk (silent mode supported)
+- Optional: delete your messages before leaving
 
-### 👥 Friends Cleaner
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-[`friends-cleaner/friends-cleaner.js`](friends-cleaner/friends-cleaner.js)
+### 💬 Not Friends
+- All DMs from people who aren't in your friend list
+- 3 filters: **With my messages** / **Without my messages** / **Empty**
+- Deep scan to detect truly empty conversations
+- Clean + close in one click
 
-Sort by date added, name, or account age. Quick filters for new accounts, no-avatar users, fresh friends, and long-time friends. Two-step per-row delete. Custom Discord-style UI.
+</td>
+<td width="50%">
 
-![Friends preview](assets/friends-preview.png)
+### 📜 Universal History
+- Logs every friend removed, group left, DM cleaned
+- Search, filter by type, clear all
+- Session-only storage (cleared on page refresh)
 
-### 🚪 Groups Cleaner
+</td>
+</tr>
+</table>
 
-[`groups-cleaner/groups-cleaner.js`](groups-cleaner/groups-cleaner.js)
+---
 
-Silent mode, persisted. Auto-detects groups where you are the only member. Click a name to open the chat. Bulk-leave with a progress overlay.
+## 🎨 Highlights
 
-![Groups preview](assets/groups-preview.png)
+- **Native Discord look** — same fonts, colors, and interactions
+- **Floating draggable window** — minimize, move, reload
+- **Adaptive rate-limit handling** — no manual cooldowns
+- **Live progress bars** — global counter + per-conversation clean tracker
+- **Loading modal** with progress on startup
+- **Zero dependencies** — pure vanilla JavaScript
 
-### 💬 DM Cleaner
+---
 
-[`dm-cleaner/dm-cleaner.js`](dm-cleaner/dm-cleaner.js)
+## 🚀 Installation
 
-Auto-detects the DM you are viewing. Fetches your messages, confirms, then deletes them with an adaptive delay that respects rate limits.
+1. Open **Discord** in your browser → `discord.com/app`
+2. Open the **DevTools Console** (`F12` → Console tab)
+3. Copy the entire content of `discord-tools.js`
+4. Paste it into the console and hit **Enter**
+5. The Discord Tools panel appears — enjoy!
 
-![DM preview](assets/dm-preview.png)
+> 💡 Tip: you can save the script as a **bookmarklet** or use it via a userscript manager (Tampermonkey, Violentmonkey).
 
-## Shared features
+---
 
-- **Token stays local.** No third-party servers, no telemetry.
-- **Native Discord UI.** Draggable, dark theme.
-- **Rate-limit handling.** Retry with backoff and jitter.
-- **Cancellable.** Every long-running action has a cancel button.
-- **Progress overlay.** Live count, ETA, error tally.
-- **Persistent prefs.** Sort, filters, silent mode are remembered.
+## 👁️ Preview
 
-## How it works
+```
+┌──────────────────────────────────────────────────────────────┐
+│  🛠  Discord Tools   [👥 Friends][👥 Groups][💬 Not Friends][📜 History]  ✕ │
+├──────────────────────────────────────────────────────────────┤
+│  🔍 Search...     [Sort ▼] [↓] [☑ Select all]  [⚙]           │
+│  [All] [🆕 New] [👻 No avatar] [🌱 Fresh] [⏳ Long-time]       │
+│                                                              │
+│  👤 Alice       Friends since 12 Jan 2024 · 💬 3d ago  🗑 🧹 │
+│  👤 Bob         Friends since 05 Mar 2025 · 🆕 🌱     🗑 🧹 │
+│  👤 Charlie     Friends since 22 Aug 2022 · ⏳        🗑 🧹 │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│  234 shown / 325 friends · 0 selected        [🗑 Remove]     │
+└──────────────────────────────────────────────────────────────┘
+```
 
-All three tools use Discord's internal API (`https://discord.com/api/v10`), the same calls the web client makes:
+---
 
-- `DELETE /users/@me/relationships/{id}` to remove a friend
-- `DELETE /channels/{id}?silent=true` to leave a group silently
-- `DELETE /channels/{id}/messages/{id}` to delete a DM message
+## ⚙️ How it works
 
-The token is read from `localStorage` via an isolated iframe, with a `webpackChunkdiscord_app` fallback.
+- Extracts your Discord token from **localStorage** or via **webpack modules**
+- Uses the official Discord API (`/api/v10`) with proper rate-limit handling
+- All operations happen client-side — nothing is sent anywhere else
+- Preferences stored in `localStorage`, history in `window.name` (session-only)
 
-## Disclaimer
+---
 
-Not affiliated with Discord Inc. Using scripts on your account may violate the ToS. Use at your own risk.
+## 🔒 Privacy
 
-## License
+- No external server, no analytics, no tracking
+- Your token never leaves your browser
+- Everything runs locally on `discord.com`
 
-[MIT](LICENSE)
+---
+
+<div align="center">
+
+**Made with ❤️ for the Discord community**
+
+</div>
