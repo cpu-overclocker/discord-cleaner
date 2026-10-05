@@ -746,7 +746,7 @@ window.__dt_run = async () => {
     .dt-badges { display:flex; gap:4px; flex-shrink:0; }
     .dt-badge { font-size:11px; padding:1px 5px; border-radius:4px; line-height:1.4; }
     .dt-actions { display:flex; gap:6px; flex-shrink:0; }
-    .dt-dm, .dt-open { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; font-family:inherit; }
+.dt-dm, .dt-open { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; font-family:inherit; display:inline-flex; align-items:center; justify-content:center; }
     .dt-dm:hover, .dt-open:hover { border-color:#5865f2; color:#5865f2; } .dt-dm.loading, .dt-open.loading { opacity:.6; cursor:wait; }
     .dt-rm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
     .dt-rm:hover { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); }
@@ -1273,7 +1273,7 @@ window.__dt_run = async () => {
       </div>
       <div class="dt-badges">${badges}</div>
       <div class="dt-actions">
-        <button class="dt-dm" title="Send a DM">💬</button>
+<button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
         <button class="dt-cl" title="Delete only your messages in this DM (click twice)">🧹 Clean</button>
         <button class="dt-rm" title="Remove this friend (click twice)">🗑 Remove</button>
       </div>
@@ -1499,9 +1499,8 @@ window.__dt_run = async () => {
       e.stopPropagation();
       if (dmBtn.classList.contains('loading')) return;
       dmBtn.classList.add('loading');
-      const prev = dmBtn.textContent; dmBtn.textContent = '…';
       try { await openDM(id); } catch {}
-      setTimeout(() => { if (dmBtn.isConnected) { dmBtn.classList.remove('loading'); dmBtn.textContent = prev; } }, 400);
+      setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400);
       return;
     }
 
@@ -1621,7 +1620,7 @@ window.__dt_run = async () => {
       </div>
       <div class="dt-badges">${badges}</div>
       <div class="dt-actions">
-        <button class="dt-open" title="Open this group in Discord">↗</button>
+<button class="dt-open" title="Open group"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
         <button class="dt-rm" title="Leave this group (click twice)">🚪 Leave</button>
       </div>
     </div>`;
@@ -1859,7 +1858,7 @@ window.__dt_run = async () => {
       </div>
       <div class="dt-badges">${badges}</div>
       <div class="dt-actions">
-        <button class="dt-dm" title="Open this DM">💬</button>
+<button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
         <button class="dt-cl" title="Delete all your messages and close the DM (click twice)">🧹 Clean</button>
       </div>
     </div>`;
@@ -2044,10 +2043,9 @@ window.__dt_run = async () => {
       e.stopPropagation();
       if (dmBtn.classList.contains('loading')) return;
       dmBtn.classList.add('loading');
-      const prev = dmBtn.textContent; dmBtn.textContent = '…';
       const nf = notFriends.find(x => x.id === id);
       if (nf) navigateToChannel(nf.channelId);
-      setTimeout(() => { if (dmBtn.isConnected) { dmBtn.classList.remove('loading'); dmBtn.textContent = prev; } }, 400);
+      setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400);
       return;
     }
 
@@ -2155,7 +2153,7 @@ window.__dt_run = async () => {
 
     const ts = h.removedAt || h.leftAt;
     const action = isGroup ? 'Left' : (isNotFriend ? 'Cleaned' : 'Removed');
-    const actions = isGroup ? '' : `<button class="dt-dm dt-h-view" title="Open profile">👤</button>`;
+const actions = isGroup ? '' : `<button class="dt-dm dt-h-view" title="Open profile"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>`;
 
     return `<div class="dt-row dt-hrow" data-id="${h.id}" data-kind="${h.kind}">
       ${av}
