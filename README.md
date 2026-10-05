@@ -85,21 +85,11 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 
 ## 👁️ Preview
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  🛠  Discord Tools   [👥 Friends][👥 Groups][💬 Not Friends][📜 History]  ✕ │
-├──────────────────────────────────────────────────────────────┤
-│  🔍 Search...     [Sort ▼] [↓] [☑ Select all]  [⚙]           │
-│  [All] [🆕 New] [👻 No avatar] [🌱 Fresh] [⏳ Long-time]       │
-│                                                              │
-│  👤 Alice       Friends since 12 Jan 2024 · 💬 3d ago  🗑 🧹 │
-│  👤 Bob         Friends since 05 Mar 2025 · 🆕 🌱     🗑 🧹 │
-│  👤 Charlie     Friends since 22 Aug 2022 · ⏳        🗑 🧹 │
-│                                                              │
-├──────────────────────────────────────────────────────────────┤
-│  234 shown / 325 friends · 0 selected        [🗑 Remove]     │
-└──────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+
+![Discord Tools Preview](assets/preview.png)
+
+</div>
 
 ---
 
