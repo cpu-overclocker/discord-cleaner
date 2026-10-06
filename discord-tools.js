@@ -50,6 +50,46 @@ window.__dt_run = async () => {
   const HEADS = { Authorization: TOKEN, "Content-Type": "application/json" };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+  // ── Discord status masks (injectés une seule fois) ─────────
+  function ensureStatusMasks() {
+    if (document.getElementById('__dt_status_masks')) return;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = '__dt_status_masks';
+    svg.setAttribute('aria-hidden', 'true');
+    svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+    svg.innerHTML = `
+      <defs>
+        <!-- Avatar round mask (44px) -->
+        <mask id="svg-mask-avatar-status-round-44" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+          <circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle>
+        </mask>
+        <!-- Avatar round mask (80px) -->
+        <mask id="svg-mask-avatar-status-round-80" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+          <circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle>
+        </mask>
+        <!-- Status masks -->
+        <mask id="svg-mask-status-online" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+        </mask>
+        <mask id="svg-mask-status-idle" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+          <circle fill="black" cx="0.25" cy="0.25" r="0.5"></circle>
+        </mask>
+        <mask id="svg-mask-status-dnd" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+          <rect fill="black" x="0.125" y="0.375" width="0.75" height="0.25" rx="0.125"></rect>
+        </mask>
+        <mask id="svg-mask-status-offline" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
+          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
+          <circle fill="black" cx="0.5" cy="0.5" r="0.25"></circle>
+        </mask>
+      </defs>`;
+    document.body.append(svg);
+  }
+  ensureStatusMasks();
+
   // ── Loading modal state (declared early to avoid TDZ errors) ──
   let _loadTarget = 0;
   let _loadCurrent = 0;
@@ -304,31 +344,227 @@ window.__dt_run = async () => {
     return out;
   }
 
-  function getFluxDispatcher() {
-    let dispatcher = null;
-    window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => {
-      for (const id in c) {
-        const exp = c[id]?.exports;
-        if (!exp) continue;
-        for (const val of [exp, exp?.default, ...Object.values(exp)]) {
+  // ── Helper : parcours webpack protégé ──────────────────
+  function scanWebpack(predicate) {
+    let found = null;
+    const chunk = [[Symbol()], {}, ({ c }) => {
+      try {
+        for (const id in c) {
+          if (found) return;
+          let mod;
+          try { mod = c[id]; } catch { continue; }
+          const exp = mod?.exports;
+          if (!exp) continue;
+
+          const candidates = [exp];
+          try { if (exp.default !== undefined) candidates.push(exp.default); } catch {}
           try {
-            if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Element) &&
-                typeof val.dispatch === 'function' && '_actionHandlers' in val) { dispatcher = val; return; }
+            if (typeof exp === 'object') {
+              for (const k in exp) {
+                try { candidates.push(exp[k]); } catch {}
+              }
+            }
           } catch {}
+
+          for (const val of candidates) {
+            if (!val) continue;
+            try {
+              if (predicate(val)) { found = val; return; }
+            } catch {}
+          }
         }
+      } catch (e) {
+        console.warn('⚠️ scanWebpack error:', e?.message);
       }
+    }];
+
+    try { window.webpackChunkdiscord_app?.push(chunk); }
+    catch (e) { console.warn('⚠️ webpack push failed:', e?.message); return null; }
+
+    // TOUJOURS pop, même si le callback a planté
+    try { window.webpackChunkdiscord_app?.pop(); } catch {}
+    return found;
+  }
+
+  // ── Flux dispatcher ─────────────────────────────────────
+  let _flux = null;
+  let _fluxTried = false;
+  function getFluxDispatcher() {
+    if (_fluxTried) return _flux;
+    _fluxTried = true;
+    _flux = scanWebpack(val =>
+      val &&
+      typeof val === 'object' &&
+      !Array.isArray(val) &&
+      !(val instanceof Element) &&
+      typeof val.dispatch === 'function' &&
+      '_actionHandlers' in val
+    );
+    return _flux;
+  }
+
+  // ── Presence store — détecteur validé par test ─────────
+  let _presenceStore = null;
+  let _presenceStoreTried = false;
+
+  function getPresenceStore() {
+    if (_presenceStoreTried) return _presenceStore;
+    _presenceStoreTried = true;
+
+    // 1. Collecter TOUS les candidats qui matchent les marqueurs Flux
+    const candidates = [];
+    window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => {
+      try {
+        for (const id in c) {
+          const mod = c[id];
+          const exp = mod?.exports;
+          if (!exp) continue;
+          const vals = [exp, exp?.default];
+          try {
+            if (typeof exp === 'object') {
+              for (const k in exp) { try { vals.push(exp[k]); } catch {} }
+            }
+          } catch {}
+          for (const val of vals) {
+            if (!val || typeof val !== 'object') continue;
+            try {
+              if (typeof val.getStatus === 'function' &&
+                  typeof val.getActivities === 'function' &&
+                  typeof val.addChangeListener === 'function' &&
+                  typeof val.removeChangeListener === 'function' &&
+                  '_changeCallbacks' in val &&
+                  '_dispatchToken' in val &&
+                  '_dispatcher' in val) {
+                // Dédupe
+                if (!candidates.includes(val)) candidates.push({ id, obj: val });
+              }
+            } catch {}
+          }
+        }
+      } catch {}
     }]);
     window.webpackChunkdiscord_app?.pop();
-    return dispatcher;
+
+    // 2. Valider chaque candidat avec un test empirique
+    const FAKE_ID = '000000000000000000';
+    const valid = [];
+    for (const { id, obj } of candidates) {
+      try {
+        const fakeStatus = obj.getStatus(FAKE_ID);
+        // Le vrai store DOIT retourner "offline" pour un ID inconnu
+        // (les faux positifs retournent "online" ou n'importe quoi)
+        if (fakeStatus === 'offline') {
+          valid.push({ id, obj, fakeStatus });
+        }
+      } catch {}
+    }
+
+    if (valid.length > 0) {
+      _presenceStore = valid[0].obj;
+      console.log(`✅ PresenceStore validé (id=${valid[0].id}) — ${valid.length} candidat(s) valide(s)`);
+    } else if (candidates.length > 0) {
+      // Fallback : prendre le premier candidat, mais avertir
+      _presenceStore = candidates[0].obj;
+      console.warn(`⚠️ Aucun store validé — fallback sur id=${candidates[0].id}`);
+    }
+
+    if (_presenceStore) {
+      try {
+        const myStatus = _presenceStore.getStatus(ME.id);
+        console.log(`   → getStatus(moi) = ${myStatus}`);
+      } catch (e) {
+        console.warn('   ⚠️ getStatus test échoué:', e.message);
+      }
+    } else {
+      console.warn('⚠️ PresenceStore introuvable — statuts désactivés');
+    }
+
+    return _presenceStore;
   }
-  let _flux = null;
+
+  // ── Table de correspondance des statuts Discord ─────────
+  const STATUS_META = {
+    online:    { color: '#45a366', mask: 'svg-mask-status-online',  label: 'Online' },
+    idle:      { color: '#ffc04e', mask: 'svg-mask-status-idle',    label: 'Idle' },
+    dnd:       { color: '#f23f43', mask: 'svg-mask-status-dnd',     label: 'Do Not Disturb' },
+    offline:   { color: '#84858d', mask: 'svg-mask-status-offline', label: 'Offline' },
+    invisible: { color: '#84858d', mask: 'svg-mask-status-offline', label: 'Invisible' },
+  };
+
+  function getStatus(userId) {
+    if (!_presenceStoreTried) getPresenceStore();
+    if (!_presenceStore) return 'offline';
+    try {
+      const s = _presenceStore.getStatus(userId);
+      // 🛡️ Si on récupère un objet (mauvais module), on force offline
+      if (!s || typeof s !== 'string') return 'offline';
+      // Normalisation des états spéciaux
+      if (s === 'invisible') return 'offline';
+      if (s === 'streaming') return 'online';
+      return STATUS_META[s] ? s : 'offline';
+    } catch { return 'offline'; }
+  }
+
+  // ── Filtre cyclique du chip Statut (onglet Friends) ──────
+  const STATUS_FILTER_CYCLE = ['online', 'idle', 'dnd', 'offline'];
+  const STATUS_FILTER_LABEL = {
+    online:  { icon: '🟢', label: 'Online'  },
+    idle:    { icon: '🟡', label: 'Idle'    },
+    dnd:     { icon: '🔴', label: 'DND'     },
+    offline: { icon: '⚫', label: 'Offline' },
+  };
+  // ── Avatar avec statut (style Discord natif) ──────────────
+  // size = 32 ou 40 (les masques 44/80 sont calés pour ça)
+  function avatarWithStatus(user, size = 40, opts = {}) {
+    const st = opts.status ?? getStatus(user.id);
+    const meta = STATUS_META[st];
+    const maskSize = size <= 32 ? 44 : 80;
+    const url = opts.url ?? avatarUrl(user);
+    const cls = opts.clickable === false ? '' : 'dt-av-click';
+    const title = opts.clickable === false ? '' : 'View profile';
+    return `<div class="dt-av-wrap" style="width:${size}px;height:${size}px">
+      <svg class="dt-av-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+        <foreignObject x="0" y="0" width="${size}" height="${size}" mask="url(#svg-mask-avatar-status-round-${maskSize})">
+          <img class="${cls}" src="${url}" alt="" ${title ? `title="${title}"` : ''}
+              style="width:100%;height:100%;object-fit:cover;display:block">
+        </foreignObject>
+        <rect x="${size * 0.75}" y="${size * 0.75}" width="${size * 0.25}" height="${size * 0.25}"
+              fill="${meta.color}" mask="url(#${meta.mask})" class="dt-status-rect"
+              data-uid="${user.id}" data-size="${size}">
+          <title>${meta.label}</title>
+        </rect>
+      </svg>
+    </div>`;
+  }
+
+  // Rafraîchit les pastilles visibles sans re-render
+  function refreshStatusDots() {
+    document.querySelectorAll('.dt-status-rect[data-uid]').forEach(rect => {
+      const uid = rect.dataset.uid;
+      const st = getStatus(uid);
+      // ⚡ Skip si déjà à jour (évite un reflow inutile)
+      if (rect.dataset.status === st) return;
+      rect.dataset.status = st;
+      const meta = STATUS_META[st];
+      rect.setAttribute('fill', meta.color);
+      rect.setAttribute('mask', `url(#${meta.mask})`);
+      const t = rect.querySelector('title');
+      if (t) t.textContent = meta.label;
+    });
+  }
+  // Auto-refresh toutes les 15s — pause si onglet caché
+  setInterval(() => {
+    if (!box?.isConnected) return;
+    if (document.hidden) return;
+    refreshStatusDots();
+  }, 15000);
   function openProfile(userId) {
     try {
       const el = document.querySelector(`img[src*="/users/${userId}/"]`)?.closest('[role="listitem"]');
       if (el) { el.click(); return; }
     } catch {}
     try {
-      _flux ??= getFluxDispatcher();
+      if (!_fluxTried) getFluxDispatcher();
       if (_flux) { _flux.dispatch({ type: 'USER_PROFILE_MODAL_OPEN', userId }); return; }
     } catch {}
     window.open(`discord://-/users/${userId}`);
@@ -678,6 +914,12 @@ window.__dt_run = async () => {
       background:#313338; color:#dbdee1; border-radius:12px; z-index:1000; display:flex; flex-direction:column;
       font-family:"gg sans","Noto Sans",sans-serif; box-shadow:0 12px 48px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.06); }
     #__dt_box * { box-sizing:border-box; }
+    .dt-av-wrap { position:relative; flex-shrink:0; display:inline-block; }
+    .dt-av-svg  { display:block; overflow:visible; }
+    .dt-av-svg foreignObject { display:block; }
+    .dt-av-svg img { border-radius:0; cursor:pointer; background:#1e1f22; }
+    .dt-av-svg img.dt-av-click:hover { opacity:.85; }
+    .dt-status-rect { transition:fill .2s; pointer-events:none; }
     .dt-head { display:flex; align-items:center; padding:10px 14px; cursor:grab; user-select:none; border-bottom:1px solid #1e1f22; flex-shrink:0; gap:6px; }
     .dt-logo { width:22px; height:22px; flex-shrink:0; color:#5865f2; }
     .dt-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; margin:0 8px; }
@@ -947,6 +1189,12 @@ window.__dt_run = async () => {
           <button class="dt-chip" data-chip="noavatar">👻 No avatar</button>
           <button class="dt-chip" data-chip="fresh">🌱 Fresh friends</button>
           <button class="dt-chip" data-chip="long">⏳ Long-time</button>
+          <button class="dt-chip" data-chip="status" id="dt-f-status-toggle">
+            <span class="dt-n-msg-arrow" id="dt-f-status-arrow" style="display:none">
+              <svg ...></svg>
+            </span>
+            <span id="dt-f-status-label">🟢 Online</span>
+          </button>
         </div>
         <div class="dt-adv" id="dt-f-adv">
           <label>Added after <input type="date" id="dt-f-from"></label>
@@ -1014,7 +1262,7 @@ window.__dt_run = async () => {
         <div class="dt-chips" id="dt-n-chips">
           <button class="dt-chip active" data-chip="all">All</button>
           <button class="dt-chip" data-chip="withmsg" id="dt-n-msg-toggle">
-            <span class="dt-n-msg-arrow">
+            <span class="dt-n-msg-arrow" id="dt-n-msg-arrow" style="display:none">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg>
             </span>
             <span id="dt-n-msg-label">💬 With my messages</span>
@@ -1022,6 +1270,12 @@ window.__dt_run = async () => {
           <button class="dt-chip" data-chip="empty">📭 Empty</button>
           <button class="dt-chip" data-chip="newacct">🆕 New accounts</button>
           <button class="dt-chip" data-chip="noavatar">👻 No avatar</button>
+          <button class="dt-chip" data-chip="status" id="dt-n-status-toggle">
+            <span class="dt-n-msg-arrow" id="dt-n-status-arrow" style="display:none">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg>
+            </span>
+            <span id="dt-n-status-label">🟢 Online</span>
+          </button>
         </div>
         <div class="dt-list" id="dt-n-list"></div>
       </div>
@@ -1066,9 +1320,11 @@ window.__dt_run = async () => {
   let sortDirFriend = prefs.dirFriend === 'asc' ? 'asc' : 'desc';
   let sortDirGroup  = prefs.dirGroup  === 'asc' ? 'asc' : 'desc';
   let sortDirNotFriends = prefs.dirNotFriends === 'asc' ? 'asc' : 'desc';
-  let activeChipFriend = prefs.chipFriend || 'all';
+  let activeChipFriend = prefs.chipFriend || 'all';   // 'all' | 'newacct' | 'noavatar' | 'fresh' | 'long' | 'status'
+  let statusFilterFriend = prefs.statusFilterFriend || 'online';  // 'online' | 'idle' | 'dnd' | 'offline'
   let activeChipGroup  = prefs.chipGroup  || 'all';
   let activeChipNotFriends = prefs.chipNotFriends || 'all';
+  let statusFilterNotFriends = prefs.statusFilterNotFriends || 'online';  // 'online' | 'idle' | 'dnd' | 'offline'
   let notFriendsMsgMode = prefs.notFriendsMsgMode || 'with';
 
   const statusEl   = $('dt-status');
@@ -1103,23 +1359,67 @@ window.__dt_run = async () => {
   silentCb.checked = loadSilentPref();
   silentCb.onchange = () => saveSilentPref(silentCb.checked);
 
-  box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipFriend));
+  {
+    const labelEl = document.getElementById('dt-f-status-label');
+    if (labelEl && STATUS_FILTER_LABEL[statusFilterFriend]) {
+      const { icon, label } = STATUS_FILTER_LABEL[statusFilterFriend];
+      labelEl.textContent = `${icon} ${label}`;
+    }
+  }
+
+  // ✅ Restaure le chip actif dans Friends
+  box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.chip === activeChipFriend)
+  );
+
+  // 👁️ Cache la flèche du chip statut si le chip n'est pas actif
+  {
+    const arrowEl = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow');
+    if (arrowEl) arrowEl.style.display = (activeChipFriend === 'status') ? '' : 'none';
+  }
+
+  // Restaure les chips actifs dans Groups et Not Friends
   box.querySelectorAll('#dt-g-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipGroup));
   box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipNotFriends));
+
+  // Restaure le label du chip messages
   {
     const label = document.getElementById('dt-n-msg-label');
     if (label) label.textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages';
+  }
+
+  // 👁️ Cache/affiche la flèche du chip "with messages" au boot
+  {
+    const arrowEl = document.getElementById('dt-n-msg-arrow');
+    if (arrowEl) arrowEl.style.display = (activeChipNotFriends === 'withmsg') ? '' : 'none';
+  }
+
+  // Restaure le label du chip statut Not Friends
+  {
+    const labelEl = document.getElementById('dt-n-status-label');
+    if (labelEl && STATUS_FILTER_LABEL[statusFilterNotFriends]) {
+      const { icon, label } = STATUS_FILTER_LABEL[statusFilterNotFriends];
+      labelEl.textContent = `${icon} ${label}`;
+    }
+  }
+
+  // 👁️ Cache/affiche la flèche du chip statut Not Friends
+  {
+    const arrowEl = document.getElementById('dt-n-status-arrow');
+    if (arrowEl) arrowEl.style.display = (activeChipNotFriends === 'status') ? '' : 'none';
   }
 
   const saveCurrentPrefs = () => savePrefs({
     sortFriend: $('dt-f-sort').value, dirFriend: sortDirFriend,
     avFriend: $('dt-f-av').value, fromFriend: $('dt-f-from').value, toFriend: $('dt-f-to').value,
     chipFriend: activeChipFriend,
+    statusFilterFriend,
     sortGroup: $('dt-g-sort').value, dirGroup: sortDirGroup,
     icGroup: $('dt-g-ic').value, fromGroup: $('dt-g-from').value, toGroup: $('dt-g-to').value,
     chipGroup: activeChipGroup,
     sortNotFriends: $('dt-n-sort').value, dirNotFriends: sortDirNotFriends,
     chipNotFriends: activeChipNotFriends,
+    statusFilterNotFriends,                          // 👈 AJOUTER
     notFriendsMsgMode,
     activeTab,
   });
@@ -1244,6 +1544,10 @@ window.__dt_run = async () => {
       if (activeChipFriend === 'noavatar' && !isNoAvatar(f))       return false;
       if (activeChipFriend === 'fresh'    && !isFreshFriend(f))    return false;
       if (activeChipFriend === 'long'     && !isLongTimeFriend(f)) return false;
+      if (activeChipFriend === 'status') {
+        const st = getStatus(f.id);
+        if (st !== statusFilterFriend) return false;
+      }
       return true;
     });
     const key = $('dt-f-sort').value;
@@ -1266,14 +1570,14 @@ window.__dt_run = async () => {
     ).join('');
     return `<div class="dt-row ${selectedFriends.has(f.id) ? 'sel' : ''}" data-id="${f.id}">
       <input type="checkbox" class="dt-cb" ${selectedFriends.has(f.id) ? 'checked' : ''}>
-      <img class="dt-av" loading="lazy" src="${avatarUrl(u)}" title="View profile">
+      ${avatarWithStatus(u, 40)}
       <div class="dt-info">
         <div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div>
         <div class="dt-sub">Friends since ${fmtDate(f.since)} (${fmtRelative(f.since)}) · Account created ${fmtDate(f.created)}${dmLastByUserId.has(u.id) ? ` · 💬 Last DM ${fmtRelative(dmLastByUserId.get(u.id))}` : ''}</div>
       </div>
       <div class="dt-badges">${badges}</div>
       <div class="dt-actions">
-<button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
+        <button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
         <button class="dt-cl" title="Delete only your messages in this DM (click twice)">🧹 Clean</button>
         <button class="dt-rm" title="Remove this friend (click twice)">🗑 Remove</button>
       </div>
@@ -1295,11 +1599,20 @@ window.__dt_run = async () => {
     }
   };
 
-  const renderFriends = () => {
+  let _lastFriendsHash = '';
+  const renderFriends = (force = false) => {
     visibleFriends = getVisibleFriends();
+    const hash = visibleFriends.map(f => f.id).join(',');
+    if (!force && hash === _lastFriendsHash) {
+      updateFriendFooter();
+      refreshStatusDots();
+      return;
+    }
+    _lastFriendsHash = hash;
     fListEl.innerHTML = visibleFriends.length ? visibleFriends.map(friendRowHtml).join('')
       : `<div class="dt-empty">No friends match the filters.</div>`;
     updateFriendFooter();
+    refreshStatusDots();
   };
 
   async function cleanDMWithFriend(friend, progress) {
@@ -1547,8 +1860,13 @@ window.__dt_run = async () => {
     updateFriendFooter();
   });
 
-  ['dt-f-q', 'dt-f-sort', 'dt-f-from', 'dt-f-to', 'dt-f-av'].forEach(id => {
-    $(id).addEventListener(id === 'dt-f-q' ? 'input' : 'change', () => { saveCurrentPrefs(); renderFriends(); });
+  let _fSearchTimer = null;
+  $('dt-f-q').addEventListener('input', () => {
+    clearTimeout(_fSearchTimer);
+    _fSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderFriends(); }, 180);
+  });
+  ['dt-f-sort', 'dt-f-from', 'dt-f-to', 'dt-f-av'].forEach(id => {
+    $(id).addEventListener('change', () => { saveCurrentPrefs(); renderFriends(); });
   });
   $('dt-f-dir').onclick = e => {
     sortDirFriend = sortDirFriend === 'desc' ? 'asc' : 'desc';
@@ -1562,9 +1880,33 @@ window.__dt_run = async () => {
   };
   box.querySelectorAll('#dt-f-chips .dt-chip').forEach(chip => {
     chip.onclick = () => {
+      const chipName = chip.dataset.chip;
+      const alreadyActive = chip.classList.contains('active') && activeChipFriend === chipName;
+
+      // 🔄 Chip "status" : cycle entre online → idle → dnd → offline
+      if (chipName === 'status' && alreadyActive) {
+        const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterFriend);
+        const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length];
+        statusFilterFriend = next;
+        const { icon, label } = STATUS_FILTER_LABEL[next];
+        const labelEl = document.getElementById('dt-f-status-label');
+        if (labelEl) labelEl.textContent = `${icon} ${label}`;
+        saveCurrentPrefs();
+        renderFriends();
+        return;
+      }
+
+      // Sinon : comportement normal (switch de chip)
       box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
-      activeChipFriend = chip.dataset.chip;
+      activeChipFriend = chipName;
+
+      // 👁️ Affiche/cache la flèche selon si le chip statut est actif
+      {
+        const arrowEl = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow');
+        if (arrowEl) arrowEl.style.display = (chipName === 'status') ? '' : 'none';
+      }
+
       saveCurrentPrefs(); renderFriends();
     };
   });
@@ -1791,8 +2133,13 @@ window.__dt_run = async () => {
     updateGroupFooter();
   });
 
-  ['dt-g-q', 'dt-g-sort', 'dt-g-from', 'dt-g-to', 'dt-g-ic'].forEach(id => {
-    $(id).addEventListener(id === 'dt-g-q' ? 'input' : 'change', () => { saveCurrentPrefs(); renderGroups(); });
+  let _gSearchTimer = null;
+  $('dt-g-q').addEventListener('input', () => {
+    clearTimeout(_gSearchTimer);
+    _gSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderGroups(); }, 180);
+  });
+  ['dt-g-sort', 'dt-g-from', 'dt-g-to', 'dt-g-ic'].forEach(id => {
+    $(id).addEventListener('change', () => { saveCurrentPrefs(); renderGroups(); });
   });
   $('dt-g-dir').onclick = e => {
     sortDirGroup = sortDirGroup === 'desc' ? 'asc' : 'desc';
@@ -1828,6 +2175,10 @@ window.__dt_run = async () => {
       if (activeChipNotFriends === 'empty'    && !(n.count === 0 && !n.anyMessage))     return false;
       if (activeChipNotFriends === 'newacct'  && !isNewAccount({ created: n.created })) return false;
       if (activeChipNotFriends === 'noavatar' && u.avatar)                              return false;
+      if (activeChipNotFriends === 'status') {
+        const st = getStatus(n.id);
+        if (st !== statusFilterNotFriends) return false;
+      }
       return true;
     });
     const key = $('dt-n-sort').value;
@@ -1851,7 +2202,7 @@ window.__dt_run = async () => {
     const countTxt = n.count < 0 ? '…' : n.count;
     return `<div class="dt-row ${selectedNotFriends.has(n.id) ? 'sel' : ''}" data-id="${n.id}">
       <input type="checkbox" class="dt-cb" ${selectedNotFriends.has(n.id) ? 'checked' : ''}>
-      <img class="dt-av" loading="lazy" src="${avatarUrl(u)}" title="View profile">
+      ${avatarWithStatus(u, 40)}
       <div class="dt-info">
         <div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div>
         <div class="dt-sub">💬 ${countTxt} message(s) from you · Last DM ${n.last ? fmtRelative(n.last) : 'unknown'} · Account created ${fmtDate(n.created)}</div>
@@ -1879,11 +2230,20 @@ window.__dt_run = async () => {
     }
   };
 
-  const renderNotFriends = () => {
+  let _lastNotFriendsHash = '';
+  const renderNotFriends = (force = false) => {
     visibleNotFriends = getVisibleNotFriends();
+    const hash = visibleNotFriends.map(n => n.id + ':' + n.count).join(',');
+    if (!force && hash === _lastNotFriendsHash) {
+      updateNotFriendsFooter();
+      refreshStatusDots();
+      return;
+    }
+    _lastNotFriendsHash = hash;
     nListEl.innerHTML = visibleNotFriends.length ? visibleNotFriends.map(notFriendRowHtml).join('')
       : `<div class="dt-empty">${notFriends.length === 0 ? 'No DMs with non-friends 🎉' : 'No conversations match the filters.'}</div>`;
     updateNotFriendsFooter();
+    refreshStatusDots();
   };
 
 
@@ -1928,6 +2288,31 @@ window.__dt_run = async () => {
     });
   }
 
+  async function pMap(items, fn, concurrency = 4) {
+    const results = new Array(items.length);
+    let i = 0;
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (i < items.length) {
+        const idx = i++;
+        results[idx] = await fn(items[idx], idx);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+
+  async function scanChannelFast(channelId) {
+    const url = new URL(`${BASE}/channels/${channelId}/messages`);
+    url.searchParams.set("limit", "100");
+    const r = await apiFetch(url.toString());
+    if (!r.ok) return { count: 0, anyMessage: false };
+    const batch = await r.json();
+    return {
+      count: batch.filter(isMyMessage).length,
+      anyMessage: batch.length > 0,
+    };
+  }
+
   async function scanAllNotFriends() {
     if (_nScanRunning) return;
     _nScanRunning = true;
@@ -1935,38 +2320,36 @@ window.__dt_run = async () => {
 
     _nScanDone = 0;
     _nScanTotal = notFriends.length;
-
     if (activeTab === 'notfriends') renderNotFriendsProgress();
 
-    for (const n of notFriends) {
-      if (!box.isConnected) { _nScanRunning = false; return; }
-      const c = await quickCountMyMessages(n.channelId);
-      n.count = c;
-      try {
-        const url = new URL(`${BASE}/channels/${n.channelId}/messages`);
-        url.searchParams.set("limit", "1");
-        const r2 = await apiFetch(url.toString());
-        if (r2.ok) {
-          const batch = await r2.json();
-          n.anyMessage = batch.length > 0;
-        } else {
-          n.anyMessage = false;
-        }
-      } catch { n.anyMessage = false; }
-      _nScanDone++;
+    for (const n of notFriends) { n.count = -1; n.anyMessage = undefined; }
 
-      if (activeTab === 'notfriends') {
+    let _updateScheduled = false;
+    const scheduleUI = () => {
+      if (_updateScheduled || activeTab !== 'notfriends') return;
+      _updateScheduled = true;
+      requestAnimationFrame(() => {
+        _updateScheduled = false;
         if (_nScanFill) _nScanFill.style.width = `${Math.round((_nScanDone / _nScanTotal) * 100)}%`;
         if (_nScanText) _nScanText.textContent = `${_nScanDone} / ${_nScanTotal}`;
-      }
-      await sleep(80);
-    }
+      });
+    };
+
+    await pMap(notFriends, async (n) => {
+      if (!box.isConnected) return;
+      try {
+        const res = await scanChannelFast(n.channelId);
+        n.count = res.count;
+        n.anyMessage = res.anyMessage;
+      } catch { n.count = 0; n.anyMessage = false; }
+      _nScanDone++;
+      scheduleUI();
+      await sleep(10);
+    }, 4);
 
     notFriendsScanState = 'done';
     _nScanRunning = false;
-
     lockNotFriendsControls(false);
-
     if (activeTab === 'notfriends') renderNotFriends();
   }
 
@@ -2074,9 +2457,12 @@ window.__dt_run = async () => {
     updateNotFriendsFooter();
   });
 
-  ['dt-n-q', 'dt-n-sort'].forEach(id => {
-    $(id).addEventListener(id === 'dt-n-q' ? 'input' : 'change', () => { saveCurrentPrefs(); renderNotFriends(); });
+  let _nSearchTimer = null;
+  $('dt-n-q').addEventListener('input', () => {
+    clearTimeout(_nSearchTimer);
+    _nSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderNotFriends(); }, 180);
   });
+  $('dt-n-sort').addEventListener('change', () => { saveCurrentPrefs(); renderNotFriends(); });
   $('dt-n-dir').onclick = e => {
     sortDirNotFriends = sortDirNotFriends === 'desc' ? 'asc' : 'desc';
     e.currentTarget.textContent = sortDirNotFriends === 'desc' ? '↓' : '↑';
@@ -2092,9 +2478,10 @@ window.__dt_run = async () => {
       if (notFriendsScanState === 'running' || _nScanRunning) return;
 
       const chipName = chip.dataset.chip;
+      const alreadyOnThisChip = chip.classList.contains('active') && activeChipNotFriends === chipName;
 
-      const alreadyOnThisChip = chip.classList.contains('active');
-      if (chipName === 'withmsg' && alreadyOnThisChip && activeChipNotFriends === 'withmsg') {
+      // 🔄 Chip "withmsg" : toggle with/without
+      if (chipName === 'withmsg' && alreadyOnThisChip) {
         notFriendsMsgMode = notFriendsMsgMode === 'with' ? 'without' : 'with';
         const label = document.getElementById('dt-n-msg-label');
         if (label) label.textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages';
@@ -2103,9 +2490,35 @@ window.__dt_run = async () => {
         return;
       }
 
+      // 🔄 Chip "status" : cycle entre online → idle → dnd → offline
+      if (chipName === 'status' && alreadyOnThisChip) {
+        const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterNotFriends);
+        const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length];
+        statusFilterNotFriends = next;
+        const { icon, label } = STATUS_FILTER_LABEL[next];
+        const labelEl = document.getElementById('dt-n-status-label');
+        if (labelEl) labelEl.textContent = `${icon} ${label}`;
+        saveCurrentPrefs();
+        renderNotFriends();
+        return;
+      }
+
+      // Sinon : switch de chip normal
       box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       activeChipNotFriends = chipName;
+
+      // 👁️ Cache/affiche la flèche du chip statut
+      {
+        const arrowEl = document.getElementById('dt-n-status-arrow');
+        if (arrowEl) arrowEl.style.display = (chipName === 'status') ? '' : 'none';
+      }
+
+      // 👁️ Cache/affiche la flèche du chip "with messages"
+      {
+        const arrowEl = document.getElementById('dt-n-msg-arrow');
+        if (arrowEl) arrowEl.style.display = (chipName === 'withmsg') ? '' : 'none';
+      }
 
       saveCurrentPrefs(); renderNotFriends();
     };
@@ -2149,7 +2562,13 @@ window.__dt_run = async () => {
       ? (h.iconUrl
           ? `<img class="dt-av" style="cursor:default" loading="lazy" src="${h.iconUrl}" onerror="this.style.opacity=.4">`
           : `<div class="dt-av dt-av-ph ${h.solo ? 'solo' : ''}" style="cursor:default">👥</div>`)
-      : `<img class="dt-av" loading="lazy" src="${h.avatarUrl}" onerror="this.style.opacity=.4" title="View profile">`;
+      : `<div class="dt-av-wrap" style="width:40px;height:40px">
+          <svg class="dt-av-svg" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+            <foreignObject x="0" y="0" width="40" height="40" mask="url(#svg-mask-avatar-status-round-80)">
+              <img src="${h.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">
+            </foreignObject>
+          </svg>
+        </div>`;
 
     const ts = h.removedAt || h.leftAt;
     const action = isGroup ? 'Left' : (isNotFriend ? 'Cleaned' : 'Removed');
