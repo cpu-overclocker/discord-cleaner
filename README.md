@@ -2,72 +2,83 @@
 
 # 🛠 Discord Tools
 
-**Gérez vos amis, groupes et DM Discord depuis une interface unifiée, propre et native.**
+### Clean up your Discord — friends, groups, and DMs — without the pain.
+
+A single-paste userscript that adds a native-looking panel right inside Discord Web.
 
 ![Version](https://img.shields.io/badge/version-1.3-5865f2?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Discord%20Web-5865f2?style=flat-square)
 ![Language](https://img.shields.io/badge/language-JavaScript-f7df1e?style=flat-square)
 
+**[⚡ Quick Start](#-quick-start)** · **[🎯 What it does](#-what-it-does)** · **[🔒 Safety](#-is-it-safe)** · **[❓ FAQ](#-faq)**
+
 </div>
 
 ---
 
-## ✨ Pourquoi l'utiliser ?
+## ⚡ Quick Start
 
-- **Interface native** — S'intègre parfaitement à Discord (thème, polices, animations).
-- **Statuts en direct** — Pastilles de présence (🟢 En ligne, 🟡 Absent, 🔴 DND, ⚫ Hors ligne) actualisées toutes les 15 secondes.
-- **Nettoyage complet** — Suppression de vos messages, fermeture des DM, retrait d'amis et départ de groupes.
-- **Anti rate-limit** — Backoff adaptatif pour éviter les blocages de l'API Discord.
-- **Historique persistant** — Suivi de toutes vos actions (survit aux rechargements de la page).
+1. Open Discord in your browser → **[discord.com/app](https://discord.com/app)**
+2. Press `F12` → open the **Console** tab
+3. Paste the entire content of `discord-tools.js` and hit `Enter`
+4. The panel appears — you're ready to go.
 
----
-
-## 🗂️ Les 4 onglets
-
-### 👥 Amis
-> Recherche, tri, filtres avancés (date d'ajout, type d'avatar, statut en ligne).
-- Retrait individuel ou en masse.
-- Option : nettoyer les messages du DM avant de retirer l'ami.
-- Option : fermer automatiquement le DM dans la barre latérale.
-
-### 👥 Groupes
-> Filtres : Solo, Nommé, Inactif (90j+), Récent, Ancien.
-- Départ individuel ou en masse.
-- **Mode silencieux** : quitter sans notifier les autres membres.
-- Option : supprimer vos messages avant de quitter.
-
-### 💬 Non-amis
-> Liste tous les DM avec des personnes hors de votre liste d'amis.
-- Filtres : Avec / Sans mes messages, Vide, Nouveau compte, Sans avatar, Statut.
-- Scan approfondi pour détecter les conversations vraiment vides.
-- Nettoyage et fermeture en un clic.
-
-### 📜 Historique
-> Journal complet : amis retirés, groupes quittés, DM nettoyés.
-- Recherche et filtres par type (Amis / Groupes / Non-amis).
-- Statistiques en direct (nombre d'actions, total de messages supprimés).
+> 💡 Prefer automation? Use it as a **bookmarklet** or install via **Tampermonkey / Violentmonkey**.
 
 ---
 
-## 🚀 Installation
+## 🎯 What it does
 
-1. Ouvrez **Discord** dans votre navigateur (`discord.com/app`).
-2. Ouvrez la **console DevTools** (`F12` → onglet Console).
-3. Copiez le contenu de `discord-tools.js` et collez-le dans la console.
-4. Appuyez sur **Entrée**. Le panneau Discord Tools apparaît.
-
-> 💡 **Astuce** : Utilisable comme bookmarklet ou via Tampermonkey / Violentmonkey.
+| Tab | What you get |
+|---|---|
+| 👥 **Friends** | Search, sort, and filter your entire list. Remove one or many at once. Optionally wipe your DM history first, then auto-close the chat. |
+| 👥 **Groups** | See every group DM you're in. Leave **silently** (no notification), or clean your messages before leaving. |
+| 💬 **Not Friends** | Every DM from someone *not* on your friends list. Filter by message count, scan for empty threads, clean + close in bulk. |
+| 📜 **History** | A running log of everything you've done. Search, filter, and clear it anytime. |
 
 ---
 
-## 🔒 Confidentialité
+## ✨ Why it feels good
 
-- Aucun serveur externe, aucune analyse, aucun suivi.
-- Votre token ne quitte jamais votre navigateur.
-- Tout s'exécute localement sur `discord.com`.
+- **Looks native** — Same fonts, colors, and hover states as Discord itself.
+- **Live presence** — 🟢 Online · 🟡 Idle · 🔴 DND · ⚫ Offline, refreshed every 15s right on the avatar.
+- **Smart rate-limiting** — Adaptive delays mean fewer `429` errors and no manual waiting.
+- **Real-time feedback** — Progress bars, per-conversation counters, and clear status text.
+- **Zero dependencies** — Pure vanilla JavaScript. No build step, no extension needed.
+
+---
+
+## 🔒 Is it safe?
+
+**Yes — and here's exactly why.**
+
+- ✅ **100% client-side.** Nothing is sent to any external server.
+- ✅ **Your token never leaves your browser.** It's read locally and used only for `discord.com` API calls.
+- ✅ **Fully readable.** Every line of `discord-tools.js` is auditable — check it yourself.
+- ✅ **No analytics, no tracking, no telemetry.**
+
+> ⚠️ **General rule:** never paste code into your console that you haven't read. This script is self-contained and open source.
+
+---
+
+## ❓ FAQ
+
+**Does it work on the desktop app?**
+Only the **web version** (`discord.com/app`). The desktop app blocks console access.
+
+**Will I get banned?**
+The script uses Discord's own API with normal rate limits. Still, use it responsibly — bulk actions are permanent.
+
+**Where is my data stored?**
+Preferences in `localStorage` · History in `window.name` (survives reloads, cleared when you close the tab).
+
+**Can I undo a removal?**
+No. Removing a friend, leaving a group, or deleting messages is **permanent**. Double-check before confirming.
 
 ---
 
 <div align="center">
-<i>Fait avec ❤️ pour la communauté Discord</i>
+
+**Made with ❤️ for the Discord community**
+
 </div>
