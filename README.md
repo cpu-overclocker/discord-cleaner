@@ -18,8 +18,8 @@ A single-paste userscript that adds a native-looking panel right inside Discord 
 
 ## ⚡ Quick Start
 
-1. Open Discord in your browser → **[discord.com/app](https://discord.com/app)**
-2. Press `F12` → open the **Console** tab
+1. Open **[Discord](https://discord.com/app)** in your browser or the Discord App
+2. Press `F12` or `CTRL + SHIFT + I` → open the **Console** tab
 3. Paste the entire content of `discord-tools.js` and hit `Enter`
 4. The panel appears — you're ready to go.
 
@@ -32,7 +32,7 @@ A single-paste userscript that adds a native-looking panel right inside Discord 
 | Tab | What you get |
 |---|---|
 | 👥 **Friends** | Search, sort, and filter your entire list. Remove one or many at once. Optionally wipe your DM history first, then auto-close the chat. |
-| 👥 **Groups** | See every group DM you're in. Leave **silently** (no notification), or clean your messages before leaving. |
+| 👥 **Groups** | See every group DM you're in. Leave **silently** (no notification), and clean your messages before leaving. |
 | 💬 **Not Friends** | Every DM from someone *not* on your friends list. Filter by message count, scan for empty threads, clean + close in bulk. |
 | 📜 **History** | A running log of everything you've done. Search, filter, and clear it anytime. |
 
@@ -62,9 +62,6 @@ A single-paste userscript that adds a native-looking panel right inside Discord 
 ---
 
 ## ❓ FAQ
-
-**Does it work on the desktop app?**
-Only the **web version** (`discord.com/app`). The desktop app blocks console access.
 
 **Will I get banned?**
 The script uses Discord's own API with normal rate limits. Still, use it responsibly — bulk actions are permanent.
