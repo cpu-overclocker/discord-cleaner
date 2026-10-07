@@ -10,7 +10,7 @@ A single-paste userscript that adds a native-looking panel right inside Discord 
 ![Platform](https://img.shields.io/badge/platform-Discord%20Web-5865f2?style=flat-square)
 ![Language](https://img.shields.io/badge/language-JavaScript-f7df1e?style=flat-square)
 
-**[⚡ Quick Start](#-quick-start)** · **[🎯 What it does](#-what-it-does)** · **[🔒 Safety](#-is-it-safe)** · **[❓ FAQ](#-faq)**
+**[⚡ Quick Start](#-quick-start)** · **[🖼️ Preview](#-preview)** · **[🎯 What it does](#-what-it-does)** · **[🔒 Safety](#-is-it-safe)** · **[❓ FAQ](#-faq)**
 
 </div>
 
@@ -24,6 +24,18 @@ A single-paste userscript that adds a native-looking panel right inside Discord 
 4. The panel appears — you're ready to go.
 
 > 💡 Prefer automation? Use it as a **bookmarklet** or install via **Tampermonkey / Violentmonkey**.
+
+---
+
+## 🖼️ Preview
+
+<div align="center">
+
+![Discord Tools preview](assets/preview.png)
+
+*The Discord Tools panel — Friends, Groups, Not Friends, and History, all in one window.*
+
+</div>
 
 ---
 
