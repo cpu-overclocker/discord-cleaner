@@ -21,19 +21,26 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 
 ### 👥 Friends Manager
 - List, search, sort, and filter all your friends
-- Badges for new accounts, fresh friends, long-time friends, no-avatar
+- **Live presence dots** (🟢 Online · 🟡 Idle · 🔴 DND · ⚫ Offline) directly on avatars, refreshed every 15 s
+- Filter chips: All · 🆕 New accounts · 👻 No avatar · 🌱 Fresh friends · ⏳ Long-time · 🟢 Status (cycles online → idle → dnd → offline)
+- Advanced filters: added-after / added-before date range, avatar type (default/custom)
+- Sort by: date added, name, account created, last DM
 - Remove individually or in bulk
 - Optional: clean your DM messages before removing
 - Optional: auto-close the DM in the sidebar
+- Click avatar/name to view profile, or ↗ to open the DM
 
 </td>
 <td width="50%">
 
 ### 👥 Groups Manager
-- List all your group DMs
-- Filter by Solo, Named, Inactive, Recent, Old
-- Leave individually or in bulk (silent mode supported)
-- Optional: delete your messages before leaving
+- List all your group DMs (owned & joined)
+- Filter chips: All · 👤 Solo · ✏️ Named · 💤 Inactive (90+ d) · 🆕 Recent · ⏳ Old
+- Advanced filters: created-after / created-before date range, icon type
+- Sort by: date created, last activity, name, members
+- Leave individually or in bulk
+- **🔇 Silent mode** — leave without notifying other members
+- Optional: delete your messages *before* leaving
 
 </td>
 </tr>
@@ -42,17 +49,21 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 
 ### 💬 Not Friends
 - All DMs from people who aren't in your friend list
-- 3 filters: **With my messages** / **Without my messages** / **Empty**
-- Deep scan to detect truly empty conversations
-- Clean + close in one click
+- Filter chips: All · 💬 With my messages *(click again to toggle to 🚫 Without my messages)* · 📭 Empty · 🆕 New accounts · 👻 No avatar · 🟢 Status
+- **Deep scan** of every conversation to count your messages and detect truly empty threads
+- Live progress bar during the scan (controls locked while running)
+- Clean + close in one click, individually or in bulk
+- Badges: 🆕 new account · 👻 no avatar · 💬 N msgs from you · 📭 truly empty · 💤 you never replied
 
 </td>
 <td width="50%">
 
-### 📜 History
-- Logs every friend removed, group left, DM cleaned
-- Search, filter by type, clear all
-- Session-only storage (cleared on page refresh)
+### 📜 Universal History
+- Logs every friend removed, group left, non-friend DM cleaned
+- Search by name/ID, filter by type (👤 Friends / 👥 Groups / 💬 Not-friends)
+- Live stats: per-kind counts + total messages deleted
+- Shows context per entry: friend since, silent leave, DM closed, messages deleted…
+- Clear all with confirmation
 
 </td>
 </tr>
@@ -63,10 +74,11 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 ## 🎨 Highlights
 
 - **Native Discord look** — same fonts, colors, and interactions
-- **Floating draggable window** — minimize, move, reload
-- **Adaptive rate-limit handling** — no manual cooldowns
-- **Live progress bars** — global counter + per-conversation clean tracker
-- **Loading modal** with progress on startup
+- **Floating draggable window** — collapse, move, reload, close
+- **Adaptive rate-limit handling** — smart backoff, no manual cooldowns
+- **Live progress bars** — global counter (red/blue) + per-conversation secondary tracker
+- **Loading modal** with smooth progress on startup
+- **Native-style profile modals** fallback (webpack `USER_PROFILE_MODAL_OPEN` dispatch, or deep-link to `discord://`)
 - **Zero dependencies** — pure vanilla JavaScript
 
 ---
@@ -95,10 +107,12 @@ Clean friends, groups, and DMs — all from a sleek, native-looking panel.
 
 ## ⚙️ How it works
 
-- Extracts your Discord token from **localStorage** or via **webpack modules**
+- Extracts your Discord token from **localStorage** or via **webpack modules** (`getToken()`)
+- Reads presence status from Discord's **Flux PresenceStore** (validated empirically via `getStatus('000…0') === 'offline'`)
 - Uses the official Discord API (`/api/v10`) with proper rate-limit handling
 - All operations happen client-side — nothing is sent anywhere else
-- Preferences stored in `localStorage`, history in `window.name` (session-only)
+- **Preferences** stored in `localStorage` (sorts, chips, active tab…)
+- **History** stored in `window.name` (survives page reloads within the same tab, cleared when the tab is closed)
 
 ---
 
