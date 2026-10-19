@@ -1,9 +1,6 @@
 // ============================================================
-//  Discord Tools — Friends + Groups + Not Friends Manager (v1.3)
-//  ✨ 4 tabs: Friends · Groups · Not Friends · Universal History
-//  ✨ Not Friends: shows ALL non-friend DMs from your sidebar
-//  ✨ Single token, single window, shared utilities
-//  ✨ Progress bar integrated in the footer (no popup)
+//  Discord Tools — v1.4.6
+//  ✨ Fix: CORS on Canary/PTB + Webpack false positive (i18n)
 // ============================================================
 window.__dt_run = async () => {
   document.getElementById('__dt_box')?.remove();
@@ -46,11 +43,12 @@ window.__dt_run = async () => {
     throw new Error("Token not found — are you logged in on discord.com/app?");
   })();
 
-  const BASE  = "https://discord.com/api/v10";
+  // 🔥 FIX CORS: On utilise le domaine actuel (canary.discord.com, ptb.discord.com, discord.com)
+  const BASE  = `https://${location.host}/api/v10`;
   const HEADS = { Authorization: TOKEN, "Content-Type": "application/json" };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  // ── Discord status masks (injectés une seule fois) ─────────
+  // ── Discord status masks ─────────
   function ensureStatusMasks() {
     if (document.getElementById('__dt_status_masks')) return;
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -59,45 +57,19 @@ window.__dt_run = async () => {
     svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
     svg.innerHTML = `
       <defs>
-        <!-- Avatar round mask (44px) -->
-        <mask id="svg-mask-avatar-status-round-44" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-          <circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle>
-        </mask>
-        <!-- Avatar round mask (80px) -->
-        <mask id="svg-mask-avatar-status-round-80" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-          <circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle>
-        </mask>
-        <!-- Status masks -->
-        <mask id="svg-mask-status-online" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-        </mask>
-        <mask id="svg-mask-status-idle" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-          <circle fill="black" cx="0.25" cy="0.25" r="0.5"></circle>
-        </mask>
-        <mask id="svg-mask-status-dnd" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-          <rect fill="black" x="0.125" y="0.375" width="0.75" height="0.25" rx="0.125"></rect>
-        </mask>
-        <mask id="svg-mask-status-offline" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1">
-          <circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle>
-          <circle fill="black" cx="0.5" cy="0.5" r="0.25"></circle>
-        </mask>
+        <mask id="svg-mask-avatar-status-round-44" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle><circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle></mask>
+        <mask id="svg-mask-avatar-status-round-80" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle><circle fill="black" cx="0.84" cy="0.84" r="0.24"></circle></mask>
+        <mask id="svg-mask-status-online" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle></mask>
+        <mask id="svg-mask-status-idle" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle><circle fill="black" cx="0.25" cy="0.25" r="0.5"></circle></mask>
+        <mask id="svg-mask-status-dnd" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle><rect fill="black" x="0.125" y="0.375" width="0.75" height="0.25" rx="0.125"></rect></mask>
+        <mask id="svg-mask-status-offline" maskContentUnits="objectBoundingBox" viewBox="0 0 1 1"><circle fill="white" cx="0.5" cy="0.5" r="0.5"></circle><circle fill="black" cx="0.5" cy="0.5" r="0.25"></circle></mask>
       </defs>`;
     document.body.append(svg);
   }
   ensureStatusMasks();
 
-  // ── Loading modal state (declared early to avoid TDZ errors) ──
-  let _loadTarget = 0;
-  let _loadCurrent = 0;
-  let _loadTicker = null;
-  let _loadDotsTimer = null;
-  let _loadBaseText = '';
+  let _loadTarget = 0, _loadCurrent = 0, _loadTicker = null, _loadDotsTimer = null, _loadBaseText = '';
 
-  // ── apiFetch with rate-limit handling ───────────────────
   async function apiFetch(url, opts = {}, onWait = null) {
     const MAX = 8;
     for (let attempt = 0; attempt < MAX; attempt++) {
@@ -116,196 +88,174 @@ window.__dt_run = async () => {
     throw new Error(`Rate limited after ${MAX} attempts`);
   }
 
-  // ── Adaptive delay ──────────────────────────────────────
   class AdaptiveDelay {
     #delay; #floor;
-    static MAX = 8000;
-    static STEP_DOWN_DELAY = 20;
-    static STEP_DOWN_FLOOR = 10;
-    static STEP_UP_FLOOR   = 400;
-    constructor(total) {
-      this.#floor = Math.round(Math.min(2000, Math.max(600, 500 + total * 2)));
-      this.#delay = Math.round(Math.min(2500, Math.max(800, 700 + total * 2.5)));
-    }
-    onSuccess() {
-      this.#floor = Math.max(500, this.#floor - AdaptiveDelay.STEP_DOWN_FLOOR);
-      this.#delay = Math.max(this.#floor, this.#delay - AdaptiveDelay.STEP_DOWN_DELAY);
-    }
-    onRateLimit(retrySec) {
-      this.#floor = Math.min(AdaptiveDelay.MAX - 600, this.#floor + AdaptiveDelay.STEP_UP_FLOOR);
-      this.#delay = Math.min(AdaptiveDelay.MAX, Math.max(retrySec * 1000 + 800, this.#floor + 600));
-    }
+    static MAX = 8000; static STEP_DOWN_DELAY = 20; static STEP_DOWN_FLOOR = 10; static STEP_UP_FLOOR = 400;
+    constructor(total) { this.#floor = Math.round(Math.min(2000, Math.max(600, 500 + total * 2))); this.#delay = Math.round(Math.min(2500, Math.max(800, 700 + total * 2.5))); }
+    onSuccess() { this.#floor = Math.max(500, this.#floor - AdaptiveDelay.STEP_DOWN_FLOOR); this.#delay = Math.max(this.#floor, this.#delay - AdaptiveDelay.STEP_DOWN_DELAY); }
+    onRateLimit(retrySec) { this.#floor = Math.min(AdaptiveDelay.MAX - 600, this.#floor + AdaptiveDelay.STEP_UP_FLOOR); this.#delay = Math.min(AdaptiveDelay.MAX, Math.max(retrySec * 1000 + 800, this.#floor + 600)); }
     get current() { return this.#delay; }
   }
 
-  // ── Utilities ───────────────────────────────────────────
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const createdAt = id => new Date(Number((BigInt(id) >> 22n) + 1420070400000n));
   const fmtDate = d => d ? d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) : 'unknown';
-  const fmtDateTime = ts => {
-    if (!ts) return 'unknown';
-    const d = new Date(ts);
-    return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) +
-      ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
+  const fmtDateTime = ts => { if (!ts) return 'unknown'; const d = new Date(ts); return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }); };
   const displayName = u => u.global_name || u.username;
-  const avatarUrl = u => u.avatar
-    ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.webp?size=64`
-    : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(u.id) >> 22n) % 6n)}.png`;
+  const avatarUrl = u => u.avatar ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.webp?size=64` : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(u.id) >> 22n) % 6n)}.png`;
   const iconUrl = g => g.icon ? `https://cdn.discordapp.com/channel-icons/${g.id}/${g.icon}.webp?size=64` : null;
-  const fmtRelative = d => {
-    if (!d) return 'never';
-    const diff = Date.now() - d.getTime(), abs = Math.abs(diff), DAY = 86400000;
-    if (abs < 60000) return diff > 0 ? 'just now' : 'in a moment';
-    if (abs < 3600000) return diff > 0 ? `${Math.floor(abs/60000)} min ago` : `in ${Math.floor(abs/60000)} min`;
-    if (abs < DAY) return diff > 0 ? `${Math.floor(abs/3600000)} h ago` : `in ${Math.floor(abs/3600000)} h`;
-    if (abs < 30*DAY) return diff > 0 ? `${Math.floor(abs/DAY)} d ago` : `in ${Math.floor(abs/DAY)} d`;
-    if (abs < 365*DAY) return diff > 0 ? `${Math.floor(abs/(30*DAY))} mo ago` : `in ${Math.floor(abs/(30*DAY))} mo`;
-    return diff > 0 ? `${Math.floor(abs/(365*DAY))} y ago` : `in ${Math.floor(abs/(365*DAY))} y`;
-  };
+  const serverIconUrl = s => s.icon ? `https://cdn.discordapp.com/icons/${s.id}/${s.icon}.webp?size=64` : null;
+  const fmtRelative = d => { if (!d) return 'never'; const diff = Date.now() - d.getTime(), abs = Math.abs(diff), DAY = 86400000; if (abs < 60000) return diff > 0 ? 'just now' : 'in a moment'; if (abs < 3600000) return diff > 0 ? `${Math.floor(abs/60000)} min ago` : `in ${Math.floor(abs/60000)} min`; if (abs < DAY) return diff > 0 ? `${Math.floor(abs/3600000)} h ago` : `in ${Math.floor(abs/3600000)} h`; if (abs < 30*DAY) return diff > 0 ? `${Math.floor(abs/DAY)} d ago` : `in ${Math.floor(abs/DAY)} d`; if (abs < 365*DAY) return diff > 0 ? `${Math.floor(abs/(30*DAY))} mo ago` : `in ${Math.floor(abs/(30*DAY))} mo`; return diff > 0 ? `${Math.floor(abs/(365*DAY))} y ago` : `in ${Math.floor(abs/(365*DAY))} y`; };
   const fmtTsRelative = ts => fmtRelative(new Date(ts));
 
-  // ── Preferences ─────────────────────────────────────────
-  const PREF_KEY = '__dt_prefs_v1';
-  const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } };
-  const savePrefs = (p) => { try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch {} };
-  const prefs = loadPrefs();
+  const PREF_KEY = '__dt_prefs_v1'; const loadPrefs = () => { try { return JSON.parse(localStorage.getItem(PREF_KEY)) || {}; } catch { return {}; } }; const savePrefs = (p) => { try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch {} }; const prefs = loadPrefs();
+  const SILENT_KEY = '__dt_silent'; const loadSilentPref = () => { try { const v = localStorage.getItem(SILENT_KEY); return v === null ? true : v === '1'; } catch { return true; } }; const saveSilentPref = v => { try { localStorage.setItem(SILENT_KEY, v ? '1' : '0'); } catch {} };
 
-  const SILENT_KEY = '__dt_silent';
-  const loadSilentPref = () => { try { const v = localStorage.getItem(SILENT_KEY); return v === null ? true : v === '1'; } catch { return true; } };
-  const saveSilentPref = v => { try { localStorage.setItem(SILENT_KEY, v ? '1' : '0'); } catch {} };
+  // ════════════════════════════════════════════════════════
+  //  GUILD SETTINGS — Webpack Store (évite le CORS)
+  // ════════════════════════════════════════════════════════
+  const GUILD_SETTINGS_CACHE_KEY = '__dt_guild_settings_v1';
+  const loadGuildSettingsCache = () => { try { return JSON.parse(localStorage.getItem(GUILD_SETTINGS_CACHE_KEY)) || {}; } catch { return {}; } };
+  const saveGuildSettingsCache = () => { try { localStorage.setItem(GUILD_SETTINGS_CACHE_KEY, JSON.stringify(guildSettingsCache)); } catch {} };
+  const guildSettingsCache = loadGuildSettingsCache();
 
-  // ── Universal history (in-memory via window.name) ───────
-  const HISTORY_MAX = 500;
-  const WN_KEY = '__dt_history_v1__';
-  let history = [];
-  try {
-    if (typeof window.name === 'string' && window.name.startsWith(WN_KEY)) {
-      history = JSON.parse(window.name.slice(WN_KEY.length)) || [];
-    }
-  } catch {}
-  try {
-    localStorage.removeItem('__dt_history_v1');
-    localStorage.removeItem('__fr_history_v1');
-    localStorage.removeItem('__gl_history_v1');
-    sessionStorage.removeItem('__dt_history_v1');
-  } catch {}
+  const applyGuildSettingsToServer = (server, raw) => {
+    if (!server || !raw) return;
+    server.muted = raw.muted === true;
+    server.mutedUntil = raw.mute_config?.end_time ? new Date(raw.mute_config.end_time).getTime() : null;
+    server.notifications = typeof raw.message_notifications === 'number' ? raw.message_notifications : 0;
+    server.suppressEveryone = raw.suppress_everyone === true;
+    server.suppressRoles = raw.suppress_roles === true;
+    server.mobilePush = raw.mobile_push !== false;
+  };
 
-  const saveHistory = () => {
+  // ✅ Lecture fiable via PATCH {} (= GET déguisé qui retourne les vraies valeurs)
+  // (getGuildSettings() du Webpack store est obfusqué par Discord → retourne i18n)
+  const readGuildSettings = async (guildId) => {
     try {
-      if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
-      window.name = WN_KEY + JSON.stringify(history);
-    } catch {}
-  };
-  const pushHistory = (entry) => {
-    history = history.filter(h => !(h.id === entry.id && h.kind === entry.kind));
-    history.unshift(entry);
-    saveHistory();
-    const hc = document.getElementById('dt-hcount');
-    if (hc) hc.textContent = history.length;
-    if (activeTab === 'history') renderHistory();
-  };
-  const clearHistory = () => {
-    history = [];
-    saveHistory();
-    const hc = document.getElementById('dt-hcount');
-    if (hc) hc.textContent = '0';
-    if (activeTab === 'history') renderHistory();
+      const r = await apiFetch(`${BASE}/users/@me/guilds/${guildId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      guildSettingsCache[guildId] = data;
+      saveGuildSettingsCache();
+      return data;
+    } catch { return null; }
   };
 
-  // ── Show loading modal ──────────────────────────────────
+  async function updateGuildSettingsAPI(guildId, settings, onWait = null) {
+    try {
+      // ✅ Endpoint correct (le même que readGuildSettings)
+      const r = await apiFetch(`${BASE}/users/@me/guilds/${guildId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify(settings),
+      }, onWait);
+      if (r.ok) {
+        const data = await r.json();
+        guildSettingsCache[guildId] = data;
+        saveGuildSettingsCache();
+        return data;
+      }
+      console.warn(`⚠️ PATCH guild settings ${guildId} failed: ${r.status}`);
+    } catch (e) {
+      console.warn('updateGuildSettingsAPI error:', e);
+    }
+    return null;
+  }
+
+  const HISTORY_MAX = 500; const WN_KEY = '__dt_history_v1__'; let history = [];
+  try { if (typeof window.name === 'string' && window.name.startsWith(WN_KEY)) history = JSON.parse(window.name.slice(WN_KEY.length)) || []; } catch {}
+  
+  const saveHistory = () => { try { if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX); window.name = WN_KEY + JSON.stringify(history); } catch {} };
+  const pushHistory = (entry) => { history = history.filter(h => !(h.id === entry.id && h.kind === entry.kind)); history.unshift(entry); saveHistory(); const hc = document.getElementById('dt-hcount'); if (hc) hc.textContent = history.length; if (activeTab === 'history') renderHistory(); };
+  const clearHistory = () => { history = []; saveHistory(); const hc = document.getElementById('dt-hcount'); if (hc) hc.textContent = '0'; if (activeTab === 'history') renderHistory(); };
+
   showLoadingModal('Connecting to Discord');
   setLoadingStep('Connecting to Discord', 5);
-
   await sleep(120);
   setLoadingStep('Fetching your profile', 15);
   await sleep(100);
 
-  // ── Fetch ME + relationships + channels ─────────────────
-  console.log("📥 Fetching profile, friends & channels...");
-  const [rMe, rRel, rCh] = await Promise.all([
-    apiFetch(`${BASE}/users/@me`),
-    apiFetch(`${BASE}/users/@me/relationships`),
-    apiFetch(`${BASE}/users/@me/channels`),
-  ]);
+  const [rMe, rRel, rCh, rGuilds] = await Promise.all([apiFetch(`${BASE}/users/@me`), apiFetch(`${BASE}/users/@me/relationships`), apiFetch(`${BASE}/users/@me/channels`), apiFetch(`${BASE}/users/@me/guilds`)]);
 
-  setLoadingStep('Verifying session', 35);
-  await sleep(80);
-  if (!rMe.ok)  throw new Error(`Could not fetch profile (${rMe.status}) — invalid token?`);
+  setLoadingStep('Verifying session', 35); await sleep(80);
+  if (!rMe.ok) throw new Error(`Could not fetch profile (${rMe.status})`);
   if (!rRel.ok) throw new Error(`Could not fetch friends (${rRel.status})`);
-  if (!rCh.ok)  throw new Error(`Could not fetch channels (${rCh.status})`);
+  if (!rCh.ok) throw new Error(`Could not fetch channels (${rCh.status})`);
+  if (!rGuilds.ok) throw new Error(`Could not fetch servers (${rGuilds.status})`);
 
-  setLoadingStep('Reading your profile', 45);
-  await sleep(100);
-
+  setLoadingStep('Reading your profile', 45); await sleep(100);
   const ME = await rMe.json();
-  console.log(`👤 Logged in as ${ME.username} (${ME.id})`);
-  setLoadingStep('Loading your friends list', 55);
-  await sleep(80);
+  setLoadingStep('Loading your friends list', 55); await sleep(80);
 
-  let friends = (await rRel.json())
-    .filter(r => r.type === 1)
-    .map(r => ({ id: r.id, user: r.user, since: r.since ? new Date(r.since) : null, created: createdAt(r.id) }));
-
+  let friends = (await rRel.json()).filter(r => r.type === 1).map(r => ({ id: r.id, user: r.user, since: r.since ? new Date(r.since) : null, created: createdAt(r.id) }));
   const friendIds = new Set(friends.map(f => f.id));
 
-  setLoadingStep('Reading your conversations', 65);
-  await sleep(80);
-
+  setLoadingStep('Reading your conversations', 65); await sleep(80);
   const channels = await rCh.json();
-  const dmChannelByUserId = new Map();
-  const dmLastByUserId = new Map();
-  for (const ch of channels) {
-    if (ch.type === 1 && ch.recipients?.[0]) {
-      dmChannelByUserId.set(ch.recipients[0].id, ch.id);
-      if (ch.last_message_id) dmLastByUserId.set(ch.recipients[0].id, createdAt(ch.last_message_id));
-    }
-  }
+  const dmChannelByUserId = new Map(), dmLastByUserId = new Map();
+  for (const ch of channels) { if (ch.type === 1 && ch.recipients?.[0]) { dmChannelByUserId.set(ch.recipients[0].id, ch.id); if (ch.last_message_id) dmLastByUserId.set(ch.recipients[0].id, createdAt(ch.last_message_id)); } }
 
-  const toGroup = ch => {
-    const rec = ch.recipients ?? [];
-    return {
-      id: ch.id,
-      name: ch.name || (rec.length ? rec.map(u => u.global_name || u.username).join(', ') : `Unnamed group (${ch.id})`),
-      named: !!ch.name,
-      size: rec.length + 1,
-      solo: rec.length === 0,
-      icon: ch.icon || null,
-      created: createdAt(ch.id),
-      last: ch.last_message_id ? createdAt(ch.last_message_id) : null,
-      members: rec.map(u => `${u.username} ${u.global_name ?? ''}`).join(' '),
-    };
-  };
+  const toGroup = ch => { const rec = ch.recipients ?? []; return { id: ch.id, name: ch.name || (rec.length ? rec.map(u => u.global_name || u.username).join(', ') : `Unnamed group`), named: !!ch.name, size: rec.length + 1, solo: rec.length === 0, icon: ch.icon || null, created: createdAt(ch.id), last: ch.last_message_id ? createdAt(ch.last_message_id) : null, members: rec.map(u => `${u.username}`).join(' ') }; };
   let groups = channels.filter(ch => ch.type === 3).map(toGroup);
 
-  setLoadingStep('Scanning your DMs', 75);
-  await sleep(80);
+  setLoadingStep('Scanning your DMs', 75); await sleep(80);
+  const notFriendChannels = channels.filter(ch => ch.type === 1 && ch.recipients?.[0] && !friendIds.has(ch.recipients[0].id)).map(ch => ({ id: ch.id, user: ch.recipients[0], lastMessageId: ch.last_message_id || null, lastMessage: ch.last_message_id ? createdAt(ch.last_message_id) : null }));
+  let notFriends = notFriendChannels.map(c => ({ id: c.user.id, user: c.user, channelId: c.id, created: createdAt(c.user.id), last: c.lastMessage, count: -1 }));
 
-  const notFriendChannels = channels
-    .filter(ch => ch.type === 1 && ch.recipients?.[0] && !friendIds.has(ch.recipients[0].id))
-    .map(ch => ({
-      id: ch.id,
-      user: ch.recipients[0],
-      lastMessageId: ch.last_message_id || null,
-      lastMessage: ch.last_message_id ? createdAt(ch.last_message_id) : null,
-    }));
+  setLoadingStep('Loading your servers', 80); await sleep(80);
+  const guildsRaw = await rGuilds.json();
 
-  let notFriends = notFriendChannels.map(c => {
-    const u = c.user;
-    return {
-      id: u.id,
-      user: u,
-      channelId: c.id,
-      created: createdAt(u.id),
-      last: c.lastMessage,
-      count: -1,
-    };
+  // 🔥 FIX Webpack: SortedGuildStore (recherche stricte)
+  let sidebarOrder = [];
+  try {
+    let store = null;
+    window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => {
+      for (const id in c) {
+        const exp = c[id]?.exports;
+        if (!exp) continue;
+        for (const v of [exp, exp?.default, ...Object.values(exp)]) {
+          if (!v || typeof v !== 'object') continue;
+          try {
+            if (typeof v.getFlattenedGuildIds === 'function') {
+              const test = v.getFlattenedGuildIds();
+              // Vérifie que c'est bien un tableau d'IDs de serveurs (17-20 chiffres)
+              if (Array.isArray(test) && test.length > 0 && typeof test[0] === 'string' && /^\d{17,20}$/.test(test[0])) {
+                store = v;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }]);
+    window.webpackChunkdiscord_app?.pop();
+    if (store) sidebarOrder = store.getFlattenedGuildIds() || [];
+  } catch (e) {}
+
+  if (sidebarOrder.length === 0) {
+    try {
+      const rSettings = await apiFetch(`${BASE}/users/@me/settings`);
+      if (rSettings.ok) {
+        const settings = await rSettings.json();
+        if (settings.guild_folders) for (const folder of settings.guild_folders) if (Array.isArray(folder.guild_ids)) sidebarOrder.push(...folder.guild_ids);
+      }
+    } catch (e) {}
+  }
+
+  const realGuildIds = new Set(guildsRaw.map(g => g.id));
+  const sidebarPos = new Map();
+  sidebarOrder.forEach((id, i) => { if (realGuildIds.has(id)) sidebarPos.set(id, i); });
+
+  let servers = guildsRaw.map((g, index) => {
+    const srv = { id: g.id, name: g.name, icon: g.icon || null, owner: !!g.owner, features: g.features || [], created: createdAt(g.id), originalIndex: sidebarPos.has(g.id) ? sidebarPos.get(g.id) : (10000 + index), muted: false, mutedUntil: null, notifications: 0, suppressEveryone: false, suppressRoles: false, mobilePush: true };
+    const cached = guildSettingsCache[g.id];
+    if (cached) applyGuildSettingsToServer(srv, cached);
+    return srv;
   });
 
-  console.log(`  → ${friends.length} friend(s) · ${groups.length} group(s) · ${notFriends.length} non-friend DM(s) · ${history.length} in history`);
-
-  setLoadingStep('Preparing the interface', 88);
-  await sleep(100);
+  setLoadingStep('Preparing the interface', 88); await sleep(100);
 
   const DAY = 86400000;
   const isNewAccount     = f => (Date.now() - f.created.getTime()) < 30 * DAY;
@@ -315,371 +265,66 @@ window.__dt_run = async () => {
   const isNewGroup  = g => (Date.now() - g.created.getTime()) < 30 * DAY;
   const isOldGroup  = g => (Date.now() - g.created.getTime()) > 365 * DAY;
   const isInactive  = g => !g.last || (Date.now() - g.last.getTime()) > 90 * DAY;
+  const isNewServer = s => (Date.now() - s.created.getTime()) < 30 * DAY;
+  const isOldServer = s => (Date.now() - s.created.getTime()) > 365 * DAY;
 
-  function badgesForFriend(f) {
-    const out = [];
-    if (isNewAccount(f))     out.push({ icon: '🆕', label: 'New account (< 30 days)',     color: '#5865f2' });
-    if (isNoAvatar(f))       out.push({ icon: '👻', label: 'No custom avatar',            color: '#b5bac1' });
-    if (isFreshFriend(f))    out.push({ icon: '🌱', label: 'Friend for less than 7 days', color: '#23a55a' });
-    if (isLongTimeFriend(f)) out.push({ icon: '⏳', label: 'Friend for over a year',      color: '#faa61a' });
-    return out;
-  }
-  function badgesForGroup(g) {
-    const out = [];
-    if (g.solo)         out.push({ icon: '👤', label: "You're the only member",   color: '#faa61a' });
-    if (isNewGroup(g))  out.push({ icon: '🆕', label: 'New group (< 30 days)',    color: '#5865f2' });
-    if (isOldGroup(g))  out.push({ icon: '⏳', label: 'Group older than a year',  color: '#b5bac1' });
-    if (isInactive(g))  out.push({ icon: '💤', label: 'No activity for 90+ days', color: '#949ba4' });
-    return out;
-  }
-  function badgesForNotFriend(nf) {
-    const out = [];
-    const u = nf.user;
-    const created = createdAt(u.id);
-    if ((Date.now() - created.getTime()) < 30 * DAY) out.push({ icon: '🆕', label: 'New account (< 30 days)', color: '#5865f2' });
-    if (!u.avatar) out.push({ icon: '👻', label: 'No custom avatar', color: '#b5bac1' });
-    if (nf.count > 0)      out.push({ icon: '💬', label: `${nf.count} message(s) from you`, color: '#5865f2' });
-    else if (nf.count === 0 && !nf.anyMessage) out.push({ icon: '📭', label: 'Truly empty conversation', color: '#949ba4' });
-    else if (nf.count === 0) out.push({ icon: '💤', label: 'You never replied', color: '#949ba4' });
-    return out;
-  }
+  function badgesForFriend(f) { const out = []; if (isNewAccount(f)) out.push({ icon: '🆕', label: 'New account', color: '#5865f2' }); if (isNoAvatar(f)) out.push({ icon: '👻', label: 'No avatar', color: '#b5bac1' }); if (isFreshFriend(f)) out.push({ icon: '🌱', label: '< 7 days', color: '#23a55a' }); if (isLongTimeFriend(f)) out.push({ icon: '⏳', label: '> 1 year', color: '#faa61a' }); return out; }
+  function badgesForGroup(g) { const out = []; if (g.solo) out.push({ icon: '👤', label: 'Solo', color: '#faa61a' }); if (isNewGroup(g)) out.push({ icon: '🆕', label: 'New', color: '#5865f2' }); if (isOldGroup(g)) out.push({ icon: '⏳', label: 'Old', color: '#b5bac1' }); if (isInactive(g)) out.push({ icon: '💤', label: 'Inactive', color: '#949ba4' }); return out; }
+  function badgesForNotFriend(nf) { const out = []; const u = nf.user; if ((Date.now() - createdAt(u.id).getTime()) < 30 * DAY) out.push({ icon: '🆕', label: 'New', color: '#5865f2' }); if (!u.avatar) out.push({ icon: '👻', label: 'No avatar', color: '#b5bac1' }); if (nf.count > 0) out.push({ icon: '💬', label: `${nf.count} msg`, color: '#5865f2' }); else if (nf.count === 0 && !nf.anyMessage) out.push({ icon: '📭', label: 'Empty', color: '#949ba4' }); else if (nf.count === 0) out.push({ icon: '💤', label: 'No reply', color: '#949ba4' }); return out; }
+  function badgesForServer(s) { const out = []; if (s.owner) out.push({ icon: '👑', label: 'Owned', color: '#faa61a' }); if (s.muted) out.push({ icon: '🔕', label: 'Muted', color: '#da373c' }); if (s.notifications === 1) out.push({ icon: '📢', label: '@mentions', color: '#5865f2' }); if (s.notifications === 2) out.push({ icon: '🔕', label: 'Nothing', color: '#da373c' }); if (s.suppressEveryone) out.push({ icon: '@', label: '@everyone', color: '#949ba4' }); if (isNewServer(s)) out.push({ icon: '🆕', label: 'Recent', color: '#5865f2' }); if (isOldServer(s)) out.push({ icon: '⏳', label: 'Old', color: '#b5bac1' }); return out; }
 
-  // ── Helper : parcours webpack protégé ──────────────────
-  function scanWebpack(predicate) {
-    let found = null;
-    const chunk = [[Symbol()], {}, ({ c }) => {
-      try {
-        for (const id in c) {
-          if (found) return;
-          let mod;
-          try { mod = c[id]; } catch { continue; }
-          const exp = mod?.exports;
-          if (!exp) continue;
-
-          const candidates = [exp];
-          try { if (exp.default !== undefined) candidates.push(exp.default); } catch {}
-          try {
-            if (typeof exp === 'object') {
-              for (const k in exp) {
-                try { candidates.push(exp[k]); } catch {}
-              }
-            }
-          } catch {}
-
-          for (const val of candidates) {
-            if (!val) continue;
-            try {
-              if (predicate(val)) { found = val; return; }
-            } catch {}
-          }
-        }
-      } catch (e) {
-        console.warn('⚠️ scanWebpack error:', e?.message);
-      }
-    }];
-
-    try { window.webpackChunkdiscord_app?.push(chunk); }
-    catch (e) { console.warn('⚠️ webpack push failed:', e?.message); return null; }
-
-    // TOUJOURS pop, même si le callback a planté
-    try { window.webpackChunkdiscord_app?.pop(); } catch {}
-    return found;
-  }
-
-  // ── Flux dispatcher ─────────────────────────────────────
-  let _flux = null;
-  let _fluxTried = false;
-  function getFluxDispatcher() {
-    if (_fluxTried) return _flux;
-    _fluxTried = true;
-    _flux = scanWebpack(val =>
-      val &&
-      typeof val === 'object' &&
-      !Array.isArray(val) &&
-      !(val instanceof Element) &&
-      typeof val.dispatch === 'function' &&
-      '_actionHandlers' in val
-    );
-    return _flux;
-  }
-
-  // ── Presence store — détecteur validé par test ─────────
-  let _presenceStore = null;
-  let _presenceStoreTried = false;
-
+  let _flux = null, _fluxTried = false;
+  function getFluxDispatcher() { if (_fluxTried) return _flux; _fluxTried = true; let found = null; window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => { for (const id in c) { const exp = c[id]?.exports; if (!exp) continue; for (const v of [exp, exp?.default, ...Object.values(exp)]) { try { if (v && typeof v.dispatch === 'function' && '_actionHandlers' in v) { found = v; return; } } catch {} } } }]); window.webpackChunkdiscord_app?.pop(); _flux = found; return _flux; }
+  
+  let _presenceStore = null, _presenceStoreTried = false;
   function getPresenceStore() {
-    if (_presenceStoreTried) return _presenceStore;
-    _presenceStoreTried = true;
-
-    // 1. Collecter TOUS les candidats qui matchent les marqueurs Flux
+    if (_presenceStoreTried) return _presenceStore; _presenceStoreTried = true;
     const candidates = [];
-    window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => {
-      try {
-        for (const id in c) {
-          const mod = c[id];
-          const exp = mod?.exports;
-          if (!exp) continue;
-          const vals = [exp, exp?.default];
-          try {
-            if (typeof exp === 'object') {
-              for (const k in exp) { try { vals.push(exp[k]); } catch {} }
-            }
-          } catch {}
-          for (const val of vals) {
-            if (!val || typeof val !== 'object') continue;
-            try {
-              if (typeof val.getStatus === 'function' &&
-                  typeof val.getActivities === 'function' &&
-                  typeof val.addChangeListener === 'function' &&
-                  typeof val.removeChangeListener === 'function' &&
-                  '_changeCallbacks' in val &&
-                  '_dispatchToken' in val &&
-                  '_dispatcher' in val) {
-                // Dédupe
-                if (!candidates.includes(val)) candidates.push({ id, obj: val });
-              }
-            } catch {}
-          }
-        }
-      } catch {}
-    }]);
+    window.webpackChunkdiscord_app?.push([[Symbol()], {}, ({ c }) => { for (const id in c) { const exp = c[id]?.exports; if (!exp) continue; for (const v of [exp, exp?.default, ...Object.values(exp)]) { if (!v || typeof v !== 'object') continue; try { if (typeof v.getStatus === 'function' && typeof v.getActivities === 'function' && typeof v.addChangeListener === 'function' && '_changeCallbacks' in v && '_dispatcher' in v) { if (!candidates.includes(v)) candidates.push(v); } } catch {} } } }]);
     window.webpackChunkdiscord_app?.pop();
-
-    // 2. Valider chaque candidat avec un test empirique
-    const FAKE_ID = '000000000000000000';
     const valid = [];
-    for (const { id, obj } of candidates) {
-      try {
-        const fakeStatus = obj.getStatus(FAKE_ID);
-        // Le vrai store DOIT retourner "offline" pour un ID inconnu
-        // (les faux positifs retournent "online" ou n'importe quoi)
-        if (fakeStatus === 'offline') {
-          valid.push({ id, obj, fakeStatus });
-        }
-      } catch {}
-    }
-
-    if (valid.length > 0) {
-      _presenceStore = valid[0].obj;
-      console.log(`✅ PresenceStore validé (id=${valid[0].id}) — ${valid.length} candidat(s) valide(s)`);
-    } else if (candidates.length > 0) {
-      // Fallback : prendre le premier candidat, mais avertir
-      _presenceStore = candidates[0].obj;
-      console.warn(`⚠️ Aucun store validé — fallback sur id=${candidates[0].id}`);
-    }
-
-    if (_presenceStore) {
-      try {
-        const myStatus = _presenceStore.getStatus(ME.id);
-        console.log(`   → getStatus(moi) = ${myStatus}`);
-      } catch (e) {
-        console.warn('   ⚠️ getStatus test échoué:', e.message);
-      }
-    } else {
-      console.warn('⚠️ PresenceStore introuvable — statuts désactivés');
-    }
-
+    for (const obj of candidates) { try { if (obj.getStatus('000000000000000000') === 'offline') valid.push(obj); } catch {} }
+    _presenceStore = valid.length ? valid[0] : (candidates.length ? candidates[0] : null);
     return _presenceStore;
   }
 
-  // ── Table de correspondance des statuts Discord ─────────
-  const STATUS_META = {
-    online:    { color: '#45a366', mask: 'svg-mask-status-online',  label: 'Online' },
-    idle:      { color: '#ffc04e', mask: 'svg-mask-status-idle',    label: 'Idle' },
-    dnd:       { color: '#f23f43', mask: 'svg-mask-status-dnd',     label: 'Do Not Disturb' },
-    offline:   { color: '#84858d', mask: 'svg-mask-status-offline', label: 'Offline' },
-    invisible: { color: '#84858d', mask: 'svg-mask-status-offline', label: 'Invisible' },
-  };
-
-  function getStatus(userId) {
-    if (!_presenceStoreTried) getPresenceStore();
-    if (!_presenceStore) return 'offline';
-    try {
-      const s = _presenceStore.getStatus(userId);
-      // 🛡️ Si on récupère un objet (mauvais module), on force offline
-      if (!s || typeof s !== 'string') return 'offline';
-      // Normalisation des états spéciaux
-      if (s === 'invisible') return 'offline';
-      if (s === 'streaming') return 'online';
-      return STATUS_META[s] ? s : 'offline';
-    } catch { return 'offline'; }
-  }
-
-  // ── Filtre cyclique du chip Statut (onglet Friends) ──────
+  const STATUS_META = { online: { color: '#45a366', mask: 'svg-mask-status-online', label: 'Online' }, idle: { color: '#ffc04e', mask: 'svg-mask-status-idle', label: 'Idle' }, dnd: { color: '#f23f43', mask: 'svg-mask-status-dnd', label: 'Do Not Disturb' }, offline: { color: '#84858d', mask: 'svg-mask-status-offline', label: 'Offline' } };
+  function getStatus(userId) { if (!_presenceStoreTried) getPresenceStore(); if (!_presenceStore) return 'offline'; try { const s = _presenceStore.getStatus(userId); return STATUS_META[s] ? s : 'offline'; } catch { return 'offline'; } }
+  
   const STATUS_FILTER_CYCLE = ['online', 'idle', 'dnd', 'offline'];
-  const STATUS_FILTER_LABEL = {
-    online:  { icon: '🟢', label: 'Online'  },
-    idle:    { icon: '🟡', label: 'Idle'    },
-    dnd:     { icon: '🔴', label: 'DND'     },
-    offline: { icon: '⚫', label: 'Offline' },
-  };
-  // ── Avatar avec statut (style Discord natif) ──────────────
-  // size = 32 ou 40 (les masques 44/80 sont calés pour ça)
+  const STATUS_FILTER_LABEL = { online: { icon: '🟢', label: 'Online' }, idle: { icon: '🟡', label: 'Idle' }, dnd: { icon: '🔴', label: 'DND' }, offline: { icon: '⚫', label: 'Offline' } };
+  
   function avatarWithStatus(user, size = 40, opts = {}) {
-    const st = opts.status ?? getStatus(user.id);
-    const meta = STATUS_META[st];
-    const maskSize = size <= 32 ? 44 : 80;
-    const url = opts.url ?? avatarUrl(user);
-    const cls = opts.clickable === false ? '' : 'dt-av-click';
-    const title = opts.clickable === false ? '' : 'View profile';
-    return `<div class="dt-av-wrap" style="width:${size}px;height:${size}px">
-      <svg class="dt-av-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
-        <foreignObject x="0" y="0" width="${size}" height="${size}" mask="url(#svg-mask-avatar-status-round-${maskSize})">
-          <img class="${cls}" src="${url}" alt="" ${title ? `title="${title}"` : ''}
-              style="width:100%;height:100%;object-fit:cover;display:block">
-        </foreignObject>
-        <rect x="${size * 0.75}" y="${size * 0.75}" width="${size * 0.25}" height="${size * 0.25}"
-              fill="${meta.color}" mask="url(#${meta.mask})" class="dt-status-rect"
-              data-uid="${user.id}" data-size="${size}">
-          <title>${meta.label}</title>
-        </rect>
-      </svg>
-    </div>`;
+    const st = opts.status ?? getStatus(user.id); const meta = STATUS_META[st]; const maskSize = size <= 32 ? 44 : 80;
+    return `<div class="dt-av-wrap" style="width:${size}px;height:${size}px"><svg class="dt-av-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true"><foreignObject x="0" y="0" width="${size}" height="${size}" mask="url(#svg-mask-avatar-status-round-${maskSize})"><img src="${opts.url ?? avatarUrl(user)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></foreignObject><rect x="${size * 0.75}" y="${size * 0.75}" width="${size * 0.25}" height="${size * 0.25}" fill="${meta.color}" mask="url(#${meta.mask})" class="dt-status-rect" data-uid="${user.id}" data-size="${size}"></rect></svg></div>`;
   }
+  function refreshStatusDots() { document.querySelectorAll('.dt-status-rect[data-uid]').forEach(rect => { const uid = rect.dataset.uid; const st = getStatus(uid); if (rect.dataset.status === st) return; rect.dataset.status = st; const meta = STATUS_META[st]; rect.setAttribute('fill', meta.color); rect.setAttribute('mask', `url(#${meta.mask})`); }); }
+  setInterval(() => { if (box?.isConnected && !document.hidden) refreshStatusDots(); }, 15000);
+  
+  function openProfile(userId) { try { const el = document.querySelector(`img[src*="/users/${userId}/"]`)?.closest('[role="listitem"]'); if (el) { el.click(); return; } } catch {} try { const flux = getFluxDispatcher(); if (flux) { flux.dispatch({ type: 'USER_PROFILE_MODAL_OPEN', userId }); return; } } catch {} window.open(`discord://-/users/${userId}`); }
+  function navigateToChannel(channelId) { const path = `/channels/@me/${channelId}`; if (location.pathname === path) return; window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate', { state: {} })); }
+  function navigateToGuild(guildId) { const path = `/channels/${guildId}`; if (location.pathname.startsWith(path)) return; window.history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate', { state: {} })); }
 
-  // Rafraîchit les pastilles visibles sans re-render
-  function refreshStatusDots() {
-    document.querySelectorAll('.dt-status-rect[data-uid]').forEach(rect => {
-      const uid = rect.dataset.uid;
-      const st = getStatus(uid);
-      // ⚡ Skip si déjà à jour (évite un reflow inutile)
-      if (rect.dataset.status === st) return;
-      rect.dataset.status = st;
-      const meta = STATUS_META[st];
-      rect.setAttribute('fill', meta.color);
-      rect.setAttribute('mask', `url(#${meta.mask})`);
-      const t = rect.querySelector('title');
-      if (t) t.textContent = meta.label;
-    });
-  }
-  // Auto-refresh toutes les 15s — pause si onglet caché
-  setInterval(() => {
-    if (!box?.isConnected) return;
-    if (document.hidden) return;
-    refreshStatusDots();
-  }, 15000);
-  function openProfile(userId) {
-    try {
-      const el = document.querySelector(`img[src*="/users/${userId}/"]`)?.closest('[role="listitem"]');
-      if (el) { el.click(); return; }
-    } catch {}
-    try {
-      if (!_fluxTried) getFluxDispatcher();
-      if (_flux) { _flux.dispatch({ type: 'USER_PROFILE_MODAL_OPEN', userId }); return; }
-    } catch {}
-    window.open(`discord://-/users/${userId}`);
-  }
-  function navigateToChannel(channelId) {
-    const path = `/channels/@me/${channelId}`;
-    if (location.pathname === path) return;
-    window.history.pushState({}, '', path);
-    window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-  }
-
-  async function resolveDMChannel(userId) {
-    let id = dmChannelByUserId.get(userId);
-    if (id) return id;
-    try {
-      const r = await apiFetch(`${BASE}/users/@me/channels`, {
-        method: 'POST', body: JSON.stringify({ recipient_id: userId }),
-      });
-      if (r.ok) {
-        const ch = await r.json();
-        dmChannelByUserId.set(userId, ch.id);
-        return ch.id;
-      }
-    } catch (e) { console.warn('⚠️ resolveDMChannel:', e); }
-    return null;
-  }
-  async function closeDMChannel(channelId) {
-    if (!channelId) return false;
-    try {
-      const r = await apiFetch(`${BASE}/channels/${channelId}`, { method: 'DELETE' });
-      if (r.ok || r.status === 404) {
-        if (location.pathname.includes(channelId)) {
-          window.history.pushState({}, '', '/channels/@me');
-          window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-        }
-        return true;
-      }
-    } catch (e) { console.warn('⚠️ closeDMChannel:', e); }
-    return false;
-  }
-  async function openDM(userId) {
-    let channelId = await resolveDMChannel(userId);
-    if (!channelId) { window.open(`discord://-/users/${userId}`); return false; }
-    navigateToChannel(channelId);
-    return true;
-  }
+  async function resolveDMChannel(userId) { let id = dmChannelByUserId.get(userId); if (id) return id; try { const r = await apiFetch(`${BASE}/users/@me/channels`, { method: 'POST', body: JSON.stringify({ recipient_id: userId }) }); if (r.ok) { const ch = await r.json(); dmChannelByUserId.set(userId, ch.id); return ch.id; } } catch {} return null; }
+  async function closeDMChannel(channelId) { if (!channelId) return false; try { const r = await apiFetch(`${BASE}/channels/${channelId}`, { method: 'DELETE' }); if (r.ok || r.status === 404) return true; } catch {} return false; }
+  async function openDM(userId) { let channelId = await resolveDMChannel(userId); if (!channelId) { window.open(`discord://-/users/${userId}`); return false; } navigateToChannel(channelId); return true; }
 
   const isMyMessage = m => m.author.id === ME.id && [0, 19, 20].includes(m.type);
-
-  async function fetchAllMyMessages(channelId) {
-    const all = [];
-    let lastId = null;
-    while (true) {
-      const url = new URL(`${BASE}/channels/${channelId}/messages`);
-      url.searchParams.set("limit", "100");
-      if (lastId) url.searchParams.set("before", lastId);
-      const r = await apiFetch(url.toString());
-      if (!r.ok) break;
-      const batch = await r.json();
-      if (!batch.length) break;
-      all.push(...batch.filter(isMyMessage));
-      lastId = batch.at(-1).id;
-      if (batch.length < 100) break;
-    }
-    return all;
-  }
-
-  async function quickCountMyMessages(channelId) {
-    try {
-      const url = new URL(`${BASE}/channels/${channelId}/messages`);
-      url.searchParams.set("limit", "100");
-      const r = await apiFetch(url.toString());
-      if (!r.ok) return 0;
-      return (await r.json()).filter(isMyMessage).length;
-    } catch { return 0; }
-  }
+  async function fetchAllMyMessages(channelId) { const all = []; let lastId = null; while (true) { const url = new URL(`${BASE}/channels/${channelId}/messages`); url.searchParams.set("limit", "100"); if (lastId) url.searchParams.set("before", lastId); const r = await apiFetch(url.toString()); if (!r.ok) break; const batch = await r.json(); if (!batch.length) break; all.push(...batch.filter(isMyMessage)); lastId = batch.at(-1).id; if (batch.length < 100) break; } return all; }
+  async function quickCountMyMessages(channelId) { try { const url = new URL(`${BASE}/channels/${channelId}/messages`); url.searchParams.set("limit", "100"); const r = await apiFetch(url.toString()); if (!r.ok) return 0; return (await r.json()).filter(isMyMessage).length; } catch { return 0; } }
 
   async function deleteMyMessages(channelId, msgs, hooks = {}) {
-    const total = msgs.length;
-    let deleted = 0, errors = 0, rateLimits = 0, lastErrorStatus = 0;
-    const delay = new AdaptiveDelay(total);
-
+    const total = msgs.length; let deleted = 0, errors = 0, rateLimits = 0, lastErrorStatus = 0; const delay = new AdaptiveDelay(total);
     for (const msg of msgs) {
       if (hooks.isCancelled?.()) break;
       let attempts403 = 0, attemptsOther = 0, done = false;
-
       while (!done) {
-        let r;
-        try {
-          r = await fetch(`${BASE}/channels/${channelId}/messages/${msg.id}`, { method: "DELETE", headers: HEADS });
-        } catch (e) {
-          await sleep(1500);
-          if (++attemptsOther >= 2) { errors++; lastErrorStatus = -1; done = true; }
-          continue;
-        }
-
-        if (r.status === 204 || r.status === 404) {
-          deleted++; delay.onSuccess(); done = true;
-        } else if (r.status === 403) {
-          attempts403++;
-          if (attempts403 < 3) { await sleep(1500); }
-          else { errors++; lastErrorStatus = 403; done = true; }
-        } else if (r.status === 429) {
-          rateLimits++;
-          const body = await r.json().catch(() => ({}));
-          delay.onRateLimit(body.retry_after ?? 1);
-          hooks.onProgress?.(deleted, total, errors, rateLimits, delay.current);
-          await sleep(delay.current);
-        } else {
-          attemptsOther++;
-          if (attemptsOther < 2) { await sleep(2000); }
-          else { errors++; lastErrorStatus = r.status; done = true; }
-        }
+        let r; try { r = await fetch(`${BASE}/channels/${channelId}/messages/${msg.id}`, { method: "DELETE", headers: HEADS }); } catch (e) { await sleep(1500); if (++attemptsOther >= 2) { errors++; lastErrorStatus = -1; done = true; } continue; }
+        if (r.status === 204 || r.status === 404) { deleted++; delay.onSuccess(); done = true; }
+        else if (r.status === 403) { attempts403++; if (attempts403 < 3) await sleep(1500); else { errors++; lastErrorStatus = 403; done = true; } }
+        else if (r.status === 429) { rateLimits++; const body = await r.json().catch(() => ({})); delay.onRateLimit(body.retry_after ?? 1); hooks.onProgress?.(deleted, total, errors, rateLimits, delay.current); await sleep(delay.current); }
+        else { attemptsOther++; if (attemptsOther < 2) await sleep(2000); else { errors++; lastErrorStatus = r.status; done = true; } }
       }
-
       hooks.onProgress?.(deleted, total, errors, rateLimits, 0);
       if (!hooks.isCancelled?.()) await sleep(delay.current);
     }
@@ -690,218 +335,118 @@ window.__dt_run = async () => {
     const msgs = await fetchAllMyMessages(channel.id);
     if (!msgs.length) return { deleted: 0, total: 0, errors: 0, skipped: true, cancelled: false, lastErrorStatus: 0 };
     progress?.setMode('clean');
-    const res = await deleteMyMessages(channel.id, msgs, {
-      isCancelled: () => progress?.isCancelled() ?? false,
-      onProgress: (done, total, errors, rateLimits, rateWait) => {
-        if (!progress) return;
-        progress.update(done, total, `🧹 ${label}`, errors);
-        if (rateLimits > 0 && rateWait) progress.setRateLimit(rateWait, 0, 0);
-        else progress.clearRateLimit();
-      },
-    });
+    const res = await deleteMyMessages(channel.id, msgs, { isCancelled: () => progress?.isCancelled() ?? false, onProgress: (done, total, errors, rateLimits, rateWait) => { if (!progress) return; progress.update(done, total, `🧹 ${label}`, errors); if (rateLimits > 0 && rateWait) progress.setRateLimit(rateWait, 0, 0); else progress.clearRateLimit(); } });
     return { ...res, total: msgs.length };
   }
 
-  async function removeFriendAPI(id, onWait) {
-    const r = await apiFetch(`${BASE}/users/@me/relationships/${id}`, { method: 'DELETE' }, onWait);
-    return r.status === 204 || r.status === 200;
-  }
-  async function leaveGroupAPI(group, silent = true) {
-    const url = `${BASE}/channels/${group.id}${silent ? '?silent=true' : ''}`;
-    const r = await apiFetch(url, { method: "DELETE" });
-    return r.status === 200 || r.status === 204 || r.status === 404;
-  }
+  async function removeFriendAPI(id, onWait) { const r = await apiFetch(`${BASE}/users/@me/relationships/${id}`, { method: 'DELETE' }, onWait); return r.status === 204 || r.status === 200; }
+  async function leaveGroupAPI(group, silent = true) { const r = await apiFetch(`${BASE}/channels/${group.id}${silent ? '?silent=true' : ''}`, { method: "DELETE" }); return r.status === 200 || r.status === 204 || r.status === 404; }
+  async function leaveGuildAPI(guildId) { try { const r = await apiFetch(`${BASE}/users/@me/guilds/${guildId}`, { method: 'DELETE' }); return r.ok || r.status === 204; } catch { return false; } }
 
   function choiceDialog({ title, message, choices }) {
     return new Promise(resolve => {
       document.getElementById('__dt_confirm')?.remove();
-      const ov = document.createElement('div');
-      ov.id = '__dt_confirm';
-      Object.assign(ov.style, {
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-        zIndex: '100001', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: '"gg sans","Noto Sans",sans-serif',
-      });
-      const box = document.createElement('div');
-      Object.assign(box.style, {
-        background: '#313338', borderRadius: '12px', padding: '24px 28px 22px',
-        width: '480px', maxWidth: '92vw', color: '#dbdee1', textAlign: 'center',
-        boxShadow: '0 12px 48px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.06)',
-      });
-      const t = document.createElement('div');
-      t.textContent = title;
-      Object.assign(t.style, { fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '10px' });
-      const m = document.createElement('div');
-      m.innerHTML = message;
-      Object.assign(m.style, { fontSize: '13px', color: '#b5bac1', lineHeight: '1.55', marginBottom: '20px', textAlign: 'left' });
+      const ov = document.createElement('div'); ov.id = '__dt_confirm'; Object.assign(ov.style, { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: '100001', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"gg sans","Noto Sans",sans-serif' });
+      const box = document.createElement('div'); Object.assign(box.style, { background: '#313338', borderRadius: '12px', padding: '24px 28px 22px', width: '480px', maxWidth: '92vw', color: '#dbdee1', textAlign: 'center', boxShadow: '0 12px 48px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.06)' });
+      const t = document.createElement('div'); t.textContent = title; Object.assign(t.style, { fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '10px' });
+      const m = document.createElement('div'); m.innerHTML = message; Object.assign(m.style, { fontSize: '13px', color: '#b5bac1', lineHeight: '1.55', marginBottom: '20px', textAlign: 'left' });
       box.append(t, m);
-
-      const row = document.createElement('div');
-      Object.assign(row.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
+      const row = document.createElement('div'); Object.assign(row.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
       for (const c of choices) {
-        const bg    = c.danger ? '#da373c' : '#4e5058';
-        const hover = c.danger ? '#a12d31' : '#6d6f78';
-        const b = document.createElement('button');
-        b.innerHTML = c.label;
-        Object.assign(b.style, {
-          flex: '1 1 0', minWidth: '110px', padding: '10px 14px', borderRadius: '6px', border: 'none',
-          background: bg, color: '#fff', fontSize: '13px', fontWeight: '600',
-          cursor: 'pointer', transition: 'background .15s', fontFamily: 'inherit',
-        });
-        b.onmouseenter = () => b.style.background = hover;
-        b.onmouseleave = () => b.style.background = bg;
-        b.onclick = () => { ov.remove(); resolve(c.value); };
+        const bg = c.danger ? '#da373c' : '#4e5058', hover = c.danger ? '#a12d31' : '#6d6f78';
+        const b = document.createElement('button'); b.innerHTML = c.label; Object.assign(b.style, { flex: '1 1 0', minWidth: '110px', padding: '10px 14px', borderRadius: '6px', border: 'none', background: bg, color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', transition: 'background .15s', fontFamily: 'inherit' });
+        b.onmouseenter = () => b.style.background = hover; b.onmouseleave = () => b.style.background = bg; b.onclick = () => { ov.remove(); resolve(c.value); };
         row.append(b);
       }
-      box.append(row);
-      ov.append(box);
-      document.body.append(ov);
+      box.append(row); ov.append(box); document.body.append(ov);
+      
+      // 👇 AJOUT : Fermer si on clique sur le fond
+      ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); resolve(null); } });
     });
   }
 
-  // ── Progress controller (drives the footer bar + status text) ───
+  function openServerSettingsModal(server) {
+    return new Promise(resolve => {
+      document.getElementById('__dt_confirm')?.remove();
+      const ov = document.createElement('div'); ov.id = '__dt_confirm'; Object.assign(ov.style, { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: '100001', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"gg sans","Noto Sans",sans-serif' });
+      const box = document.createElement('div'); Object.assign(box.style, { background: '#313338', borderRadius: '12px', padding: '22px 24px 20px', width: '500px', maxWidth: '94vw', maxHeight: '82vh', overflowY: 'auto', color: '#dbdee1', boxShadow: '0 12px 48px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.06)' });
+      const state = { muted: server.muted, muteDuration: server.mutedUntil ? Math.max(0, Math.round((server.mutedUntil - Date.now()) / 1000)) : (server.muted ? -1 : 0), notifications: server.notifications ?? 0, suppressEveryone: server.suppressEveryone ?? false, suppressRoles: server.suppressRoles ?? false, mobilePush: server.mobilePush ?? true };
+      const title = document.createElement('div'); title.textContent = server.name; Object.assign(title.style, { fontSize: '18px', fontWeight: '700', color: '#fff', marginBottom: '4px' });
+      const subtitle = document.createElement('div'); subtitle.textContent = `Joined ${fmtDate(server.created)}${server.owner ? ' · 👑 Owner' : ''}`; Object.assign(subtitle.style, { fontSize: '11px', color: '#949ba4', marginBottom: '18px' });
+      box.append(title, subtitle);
+      const sectionLabel = text => { const el = document.createElement('div'); el.textContent = text; Object.assign(el.style, { fontSize: '11px', fontWeight: '700', color: '#b5bac1', textTransform: 'uppercase', letterSpacing: '0.02em', marginTop: '16px', marginBottom: '8px' }); return el; };
+
+      const refreshNotifButtons = () => { notifRow.querySelectorAll('button').forEach(b => { const active = state.notifications === Number(b.dataset.value); b.style.background = active ? '#5865f2' : 'transparent'; b.style.borderColor = active ? '#5865f2' : '#4e5058'; b.style.color = active ? '#fff' : '#dbdee1'; }); };
+      const refreshMuteButtons = () => { muteRow.querySelectorAll('button').forEach(b => { const v = Number(b.dataset.duration); const active = state.muted ? (v === state.muteDuration || (v === -1 && state.muteDuration === -1)) : v === 0; b.style.background = active ? '#5865f2' : 'transparent'; b.style.borderColor = active ? '#5865f2' : '#4e5058'; b.style.color = active ? '#fff' : '#dbdee1'; }); };
+
+      box.append(sectionLabel('Notification Settings'));
+      const notifRow = document.createElement('div'); Object.assign(notifRow.style, { display: 'flex', gap: '6px', flexWrap: 'wrap' });
+      [{ value: 0, label: '🔔 All' }, { value: 1, label: '📢 @mentions' }, { value: 2, label: '🔕 Nothing' }].forEach(opt => {
+        const b = document.createElement('button'); b.textContent = opt.label; b.dataset.value = opt.value; Object.assign(b.style, { flex: '1 1 0', minWidth: '100px', padding: '9px 10px', borderRadius: '6px', border: '1px solid #4e5058', background: 'transparent', color: '#dbdee1', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' });
+        b.onclick = () => { state.notifications = opt.value; refreshNotifButtons(); }; notifRow.append(b);
+      });
+      refreshNotifButtons(); box.append(notifRow);
+
+      box.append(sectionLabel('Mute Server'));
+      const muteRow = document.createElement('div'); Object.assign(muteRow.style, { display: 'flex', gap: '6px', flexWrap: 'wrap' });
+      [{ label: 'Off', value: 0 }, { label: '15 min', value: 900 }, { label: '1 h', value: 3600 }, { label: '8 h', value: 28800 }, { label: '24 h', value: 86400 }, { label: 'Forever', value: -1 }].forEach(opt => {
+        const b = document.createElement('button'); b.textContent = opt.label; b.dataset.duration = opt.value; Object.assign(b.style, { flex: '1 1 0', minWidth: '60px', padding: '9px 8px', borderRadius: '6px', border: '1px solid #4e5058', background: 'transparent', color: '#dbdee1', fontSize: '12px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' });
+        b.onclick = () => { state.muted = opt.value !== 0; state.muteDuration = opt.value; refreshMuteButtons(); }; muteRow.append(b);
+      });
+      refreshMuteButtons(); box.append(muteRow);
+
+      const footer = document.createElement('div'); Object.assign(footer.style, { display: 'flex', gap: '8px', marginTop: '20px' });
+      const cancelBtn = document.createElement('button'); cancelBtn.textContent = 'Cancel'; Object.assign(cancelBtn.style, { flex: '1', padding: '10px', borderRadius: '6px', border: 'none', background: '#4e5058', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }); cancelBtn.onclick = () => { ov.remove(); resolve(null); };
+      const saveBtn = document.createElement('button'); saveBtn.textContent = '💾 Save'; Object.assign(saveBtn.style, { flex: '1', padding: '10px', borderRadius: '6px', border: 'none', background: '#5865f2', color: '#fff', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' }); saveBtn.onclick = () => { ov.remove(); resolve(state); };
+      footer.append(cancelBtn, saveBtn); box.append(footer); ov.append(box); document.body.append(ov);
+
+      // 👇 AJOUT : Fermer si on clique sur le fond
+      ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); resolve(null); } });
+    });
+  }
+
   function createProgressOverlay(initialMode = 'remove', silent = true) {
     document.getElementById('__dt_progress')?.remove();
-
-    let _cancelled = false, _mode = initialMode;
-    let _currentDone = 0, _currentTotal = 0, _currentErr = 0;
+    let _cancelled = false, _mode = initialMode, _currentDone = 0, _currentTotal = 0, _currentErr = 0;
     const configs = {
-      remove: { icon: '🗑', title: 'Removing friends',        noun: 'Removed', word: 'friend',  done: 'removed', color: '#da373c' },
-      leave:  { icon: '🚪', title: `${silent ? 'Silent' : 'Normal'} leave in progress`, noun: 'Left', word: 'group', done: 'left', color: '#da373c' },
-      clean:  { icon: '🧹', title: 'Deleting your messages',  noun: 'Deleted', word: 'message', done: 'deleted', color: '#5865f2' },
+      remove: { icon: '🗑', title: 'Removing friends', noun: 'Removed', word: 'friend', done: 'removed', color: '#da373c' },
+      leave: { icon: '🚪', title: 'Leaving groups', noun: 'Left', word: 'group', done: 'left', color: '#da373c' },
+      server: { icon: '🌐', title: 'Leaving servers', noun: 'Left', word: 'server', done: 'left', color: '#da373c' },
+      clean: { icon: '🧹', title: 'Deleting messages', noun: 'Deleted', word: 'message', done: 'deleted', color: '#5865f2' },
     };
-
     footbar.classList.add('visible');
     let cancelBtn = document.getElementById('__dt_cancel');
     if (!cancelBtn) {
-      cancelBtn = document.createElement('button');
-      cancelBtn.id = '__dt_cancel';
-      cancelBtn.className = 'dt-btn';
-      cancelBtn.textContent = '✕ Cancel';
-      Object.assign(cancelBtn.style, {
-        padding: '4px 8px', fontSize: '11px',
-        background: 'transparent', border: '1px solid #4e5058', color: '#b5bac1',
-        flexShrink: '0',
-      });
+      cancelBtn = document.createElement('button'); cancelBtn.id = '__dt_cancel'; cancelBtn.className = 'dt-btn'; cancelBtn.textContent = '✕ Cancel';
+      Object.assign(cancelBtn.style, { padding: '4px 8px', fontSize: '11px', background: 'transparent', border: '1px solid #4e5058', color: '#b5bac1', flexShrink: '0' });
       cancelBtn.onmouseenter = () => { cancelBtn.style.background = '#da373c'; cancelBtn.style.color = '#fff'; cancelBtn.style.borderColor = '#da373c'; };
       cancelBtn.onmouseleave = () => { cancelBtn.style.background = 'transparent'; cancelBtn.style.color = '#b5bac1'; cancelBtn.style.borderColor = '#4e5058'; };
-      cancelBtn.onclick = () => {
-        _cancelled = true;
-        cancelBtn.disabled = true;
-        cancelBtn.textContent = '…';
-        statusEl.style.color = '#faa61a';
-      };
+      cancelBtn.onclick = () => { _cancelled = true; cancelBtn.disabled = true; cancelBtn.textContent = '…'; statusEl.style.color = '#faa61a'; };
       delBtn.parentNode.insertBefore(cancelBtn, delBtn);
     }
-    cancelBtn.style.display = '';
-    cancelBtn.disabled = false;
-    cancelBtn.textContent = '✕ Cancel';
+    cancelBtn.style.display = ''; cancelBtn.disabled = false; cancelBtn.textContent = '✕ Cancel';
 
-    const applyBarColor = (mode) => {
-      const c = configs[mode] || configs.remove;
-      footbarFill.style.background = c.color === '#da373c'
-        ? 'linear-gradient(90deg,#da373c,#ff6b6b)'
-        : 'linear-gradient(90deg,#5865f2,#8891ff)';
-    };
-
-    const setMode = mode => {
-      _mode = mode;
-      applyBarColor(mode);
-      if (!_cancelled) statusEl.style.color = '';
-    };
+    const applyBarColor = (mode) => { const c = configs[mode] || configs.remove; footbarFill.style.background = c.color === '#da373c' ? 'linear-gradient(90deg,#da373c,#ff6b6b)' : 'linear-gradient(90deg,#5865f2,#8891ff)'; };
+    const setMode = mode => { _mode = mode; applyBarColor(mode); if (!_cancelled) statusEl.style.color = ''; };
     setMode(initialMode);
-
-    const writeStatus = (done, total, name, err, prefix) => {
-      const c = configs[_mode] || configs.remove;
-      const head = prefix ? `${prefix} ` : '';
-      const errTxt = err > 0 ? `  ⚠️ ${err} error${err > 1 ? 's' : ''}` : '';
-      const nameTxt = name ? `  ·  ⏳ ${name}` : '';
-      statusEl.textContent = `${head}${c.icon} ${c.noun}: ${done}/${total}${errTxt}${nameTxt}`;
-    };
 
     return {
       setMode,
-      // Single-item level update (per message in a DM, per friend, etc.)
-      update: (done, total, name, err = 0) => {
-        writeStatus(done, total, name, err, '');
-        footbarFill.style.width = `${total > 0 ? Math.round((done / total) * 100) : 0}%`;
-      },
-      // Global counter for bulk operations
-      setGlobal: (done, total, name, err = 0) => {
-        _currentDone = done;
-        _currentTotal = total;
-        _currentErr = err;
-        const c = configs[_mode] || configs.remove;
-        const errTxt = err > 0 ? `  ⚠️ ${err} error${err > 1 ? 's' : ''}` : '';
-        const nameTxt = name ? `  ·  ⏳ ${name}` : '';
-        statusEl.textContent = `${c.icon} ${c.noun}: ${done}/${total}${errTxt}${nameTxt}`;
-        footbarFill.style.width = `${total > 0 ? Math.round((done / total) * 100) : 0}%`;
-      },
-      setRateLimit: (waitMs, attempt, max) => {
-        const msg = attempt
-          ? `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s`
-          : `🐢 Rate limited — waiting ${(waitMs/1000).toFixed(1)}s`;
-        statusEl.textContent = msg;
-        statusEl.style.color = '#faa61a';
-      },
-      clearRateLimit: () => {
-        if (!_cancelled) statusEl.style.color = '';
-      },
-      // Show the secondary (blue) bar during a DM clean inside a bulk op.
+      update: (done, total, name, err = 0) => { const c = configs[_mode] || configs.remove; const errTxt = err > 0 ? `  ⚠️ ${err}` : ''; statusEl.textContent = `${c.icon} ${c.noun}: ${done}/${total}${errTxt}  ·  ⏳ ${name}`; footbarFill.style.width = `${total > 0 ? Math.round((done / total) * 100) : 0}%`; },
+      setGlobal: (done, total, name, err = 0) => { _currentDone = done; _currentTotal = total; _currentErr = err; const c = configs[_mode] || configs.remove; const errTxt = err > 0 ? `  ⚠️ ${err}` : ''; statusEl.textContent = `${c.icon} ${c.noun}: ${done}/${total}${errTxt}${name ? `  ·  ⏳ ${name}` : ''}`; footbarFill.style.width = `${total > 0 ? Math.round((done / total) * 100) : 0}%`; },
+      setRateLimit: (waitMs, attempt, max) => { statusEl.textContent = attempt ? `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s` : `🐢 Rate limited — waiting ${(waitMs/1000).toFixed(1)}s`; statusEl.style.color = '#faa61a'; },
+      clearRateLimit: () => { if (!_cancelled) statusEl.style.color = ''; },
       setCleanProgress: (done, total, name, err = 0) => {
-        if (total === 0 && done === 0 && !name) {
-          footbarClean.style.display = 'none';
-          footbarCleanFill.style.width = '0%';
-          cleanLabel.style.display = 'none';
-          cleanNameEl.textContent = '';
-          cleanCounterEl.textContent = '0/0';
-          const c = configs[_mode] || configs.remove;
-          const errTxt = _currentErr > 0 ? `  ⚠️ ${_currentErr} error${_currentErr > 1 ? 's' : ''}` : '';
-          statusEl.textContent = `${c.icon} ${c.noun}: ${_currentDone}/${_currentTotal}${errTxt}`;
-          return;
-        }
-        footbarClean.style.display = 'block';
-        cleanLabel.style.display = 'block';
-        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-        footbarCleanFill.style.width = pct + '%';
-        cleanNameEl.textContent = name || 'unknown';
-        cleanCounterEl.textContent = `${done}/${total}`;
-        // Status line = global counter only (name/counter now in the label)
-        const c = configs[_mode] || configs.remove;
-        const errTxt = err > 0 ? `  ⚠️ ${err}` : '';
-        statusEl.textContent = `${c.icon} ${c.noun}: ${_currentDone}/${_currentTotal}${errTxt}`;
+        if (total === 0 && done === 0 && !name) { footbarClean.style.display = 'none'; footbarCleanFill.style.width = '0%'; cleanLabel.style.display = 'none'; cleanNameEl.textContent = ''; cleanCounterEl.textContent = '0/0'; const c = configs[_mode] || configs.remove; statusEl.textContent = `${c.icon} ${c.noun}: ${_currentDone}/${_currentTotal}`; return; }
+        footbarClean.style.display = 'block'; cleanLabel.style.display = 'block'; const pct = total > 0 ? Math.round((done / total) * 100) : 0; footbarCleanFill.style.width = pct + '%'; cleanNameEl.textContent = name || 'unknown'; cleanCounterEl.textContent = `${done}/${total}`; const c = configs[_mode] || configs.remove; statusEl.textContent = `${c.icon} ${c.noun}: ${_currentDone}/${_currentTotal}${err > 0 ? ` ⚠️ ${err}` : ''}`;
       },
       finish: (done, total, err, cancelled = false) => {
-        const c = configs[_mode] || configs.remove;
-        const errTxt = err > 0 ? `  ⚠️ ${err} error${err > 1 ? 's' : ''}` : '';
-        statusEl.textContent = cancelled
-          ? `⛔ Cancelled — ${done}/${total} ${c.word}${done > 1 ? 's' : ''} ${c.done}${errTxt}`
-          : `✅ Done — ${done}/${total} ${c.word}${done > 1 ? 's' : ''} ${c.done}${errTxt}`;
-        statusEl.style.color = cancelled ? '#faa61a' : '#23a55a';
-        footbarFill.style.background = cancelled
-          ? 'linear-gradient(90deg,#faa61a,#ffcf72)'
-          : 'linear-gradient(90deg,#23a55a,#57f287)';
-        footbarFill.style.width = '100%';
-        setTimeout(() => {
-          footbar.classList.remove('visible');
-          footbarClean.style.display = 'none';
-          footbarCleanFill.style.width = '0%';
-          cleanLabel.style.display = 'none';
-          cleanNameEl.textContent = '';
-          cleanCounterEl.textContent = '0/0';
-          setTimeout(() => { footbarFill.style.width = '0%'; }, 300);
-          cancelBtn.style.display = 'none';
-        }, 3000);
+        const c = configs[_mode] || configs.remove; const errTxt = err > 0 ? `  ⚠️ ${err}` : '';
+        statusEl.textContent = cancelled ? `⛔ Cancelled — ${done}/${total} ${c.word}s ${c.done}${errTxt}` : `✅ Done — ${done}/${total} ${c.word}s ${c.done}${errTxt}`;
+        statusEl.style.color = cancelled ? '#faa61a' : '#23a55a'; footbarFill.style.background = cancelled ? 'linear-gradient(90deg,#faa61a,#ffcf72)' : 'linear-gradient(90deg,#23a55a,#57f287)'; footbarFill.style.width = '100%';
+        setTimeout(() => { footbar.classList.remove('visible'); footbarClean.style.display = 'none'; footbarCleanFill.style.width = '0%'; cleanLabel.style.display = 'none'; cleanNameEl.textContent = ''; cleanCounterEl.textContent = '0/0'; setTimeout(() => { footbarFill.style.width = '0%'; }, 300); cancelBtn.style.display = 'none'; }, 3000);
       },
-      remove: () => {
-        footbar.classList.remove('visible');
-        footbarClean.style.display = 'none';
-        footbarCleanFill.style.width = '0%';
-        cleanLabel.style.display = 'none';
-        cleanNameEl.textContent = '';
-        cleanCounterEl.textContent = '0/0';
-        cancelBtn.style.display = 'none';
-      },
+      remove: () => { footbar.classList.remove('visible'); footbarClean.style.display = 'none'; footbarCleanFill.style.width = '0%'; cleanLabel.style.display = 'none'; cleanNameEl.textContent = ''; cleanCounterEl.textContent = '0/0'; cancelBtn.style.display = 'none'; },
       isCancelled: () => _cancelled,
     };
   }
@@ -910,12 +455,10 @@ window.__dt_run = async () => {
   const style = document.createElement('style');
   style.id = '__dt_style';
   style.textContent = `
-    #__dt_box { position:fixed; top:6vh; left:calc(50% - 400px); width:800px; max-width:96vw; height:88vh;
-      background:#313338; color:#dbdee1; border-radius:12px; z-index:1000; display:flex; flex-direction:column;
-      font-family:"gg sans","Noto Sans",sans-serif; box-shadow:0 12px 48px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.06); }
+    #__dt_box { position:fixed; top:6vh; left:calc(50% - 430px); width:860px; max-width:96vw; height:88vh; background:#313338; color:#dbdee1; border-radius:12px; z-index:1000; display:flex; flex-direction:column; font-family:"gg sans","Noto Sans",sans-serif; box-shadow:0 12px 48px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.06); }
     #__dt_box * { box-sizing:border-box; }
     .dt-av-wrap { position:relative; flex-shrink:0; display:inline-block; }
-    .dt-av-svg  { display:block; overflow:visible; }
+    .dt-av-svg { display:block; overflow:visible; }
     .dt-av-svg foreignObject { display:block; }
     .dt-av-svg img { border-radius:0; cursor:pointer; background:#1e1f22; }
     .dt-av-svg img.dt-av-click:hover { opacity:.85; }
@@ -923,2029 +466,910 @@ window.__dt_run = async () => {
     .dt-head { display:flex; align-items:center; padding:10px 14px; cursor:grab; user-select:none; border-bottom:1px solid #1e1f22; flex-shrink:0; gap:6px; }
     .dt-logo { width:22px; height:22px; flex-shrink:0; color:#5865f2; }
     .dt-title { font-size:14px; font-weight:700; color:#fff; white-space:nowrap; margin:0 8px; }
-    .dt-x { background:transparent; border:none; color:#b5bac1; font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px; }
-    .dt-x:hover { background:#da373c; color:#fff; }
-    .dt-min { background:transparent; border:none; color:#b5bac1; cursor:pointer; padding:4px 6px; border-radius:4px; display:flex; align-items:center; }
-    .dt-min svg { transition:transform .15s; }
-    #__dt_box.min .dt-min svg { transform:rotate(-90deg); }
-    .dt-min:hover { background:#4e5058; color:#fff; }
-    .dt-refresh { background:transparent; border:none; color:#b5bac1; cursor:pointer; padding:4px 6px; border-radius:4px; display:flex; align-items:center; }
-    .dt-refresh svg { transition:transform .3s; }
-    .dt-refresh:hover { background:#4e5058; color:#fff; }
-    .dt-refresh:hover svg { transform:rotate(180deg); }
-    .dt-refresh.spinning svg { animation:dt-spin .8s linear infinite; }
-    @keyframes dt-spin { to { transform:rotate(360deg); } }
-    #__dt_box.min { height:auto; width:auto; min-width:0; }
-    #__dt_box.min .dt-body, #__dt_box.min .dt-foot,
-    #__dt_box.min .dt-tabs { display:none; }
-    #__dt_box.min .dt-head { border-bottom:none; padding:8px 12px; gap:6px; }
-    #__dt_box.min .dt-title { margin:0 6px 0 2px; }
-
-    .dt-tabs { display:flex; gap:2px; flex:1; }
-    .dt-tab { background:transparent; border:none; color:#949ba4; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;
-      display:flex; align-items:center; gap:6px; transition:all .12s; font-family:inherit; }
-    .dt-tab:hover { background:#3a3c43; color:#fff; }
-    .dt-tab.active { background:#5865f2; color:#fff; }
-    .dt-tabcount { background:rgba(255,255,255,.12); padding:0 6px; border-radius:99px; font-size:10px; font-weight:700; min-width:18px; text-align:center; line-height:16px; height:16px; }
-    .dt-tab.active .dt-tabcount { background:rgba(0,0,0,.22); }
-
-    .dt-body { flex:1; display:flex; overflow:hidden; position:relative; }
-    .dt-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-    .dt-panel:not(.active) { display:none; }
-
+    .dt-x { background:transparent; border:none; color:#b5bac1; font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px; } .dt-x:hover { background:#da373c; color:#fff; }
+    .dt-min { background:transparent; border:none; color:#b5bac1; cursor:pointer; padding:4px 6px; border-radius:4px; display:flex; align-items:center; } .dt-min:hover { background:#4e5058; color:#fff; }
+    .dt-refresh { background:transparent; border:none; color:#b5bac1; cursor:pointer; padding:4px 6px; border-radius:4px; display:flex; align-items:center; } .dt-refresh:hover { background:#4e5058; color:#fff; }
+    #__dt_box.min { height:auto; width:auto; min-width:0; } #__dt_box.min .dt-body, #__dt_box.min .dt-foot, #__dt_box.min .dt-tabs { display:none; } #__dt_box.min .dt-head { border-bottom:none; padding:8px 12px; gap:6px; } #__dt_box.min .dt-title { margin:0 6px 0 2px; }
+    .dt-tabs { display:flex; gap:2px; flex:1; overflow-x:auto; scrollbar-width:none; } .dt-tabs::-webkit-scrollbar { display:none; }
+    .dt-tab { background:transparent; border:none; color:#949ba4; padding:6px 10px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:5px; transition:all .12s; font-family:inherit; white-space:nowrap; flex-shrink:0; } .dt-tab:hover { background:#3a3c43; color:#fff; } .dt-tab.active { background:#5865f2; color:#fff; }
+    .dt-tabcount { background:rgba(255,255,255,.12); padding:0 6px; border-radius:99px; font-size:10px; font-weight:700; min-width:18px; text-align:center; line-height:16px; height:16px; } .dt-tab.active .dt-tabcount { background:rgba(0,0,0,.22); }
+    .dt-body { flex:1; display:flex; overflow:hidden; position:relative; } .dt-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; } .dt-panel:not(.active) { display:none; }
     .dt-bar { padding:10px 16px 8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; flex-shrink:0; }
-    .dt-bar input, .dt-bar select { background:#1e1f22; color:#dbdee1; border:1px solid #2b2d31; border-radius:4px; padding:6px 8px; font-size:12px; outline:none; font-family:inherit; }
-    .dt-bar input:focus, .dt-bar select:focus { border-color:#5865f2; }
-    .dt-btn { background:#4e5058; color:#fff; border:none; border-radius:4px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:background .15s; font-family:inherit; }
-    .dt-btn:hover { background:#6d6f78; } .dt-btn.red { background:#da373c; } .dt-btn.red:hover { background:#a12d31; }
-    .dt-btn:disabled { opacity:.45; cursor:not-allowed; }
-    .dt-chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 10px; flex-shrink:0; }
-    .dt-chip { background:#1e1f22; color:#b5bac1; border:1px solid #2b2d31; border-radius:99px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; transition:all .12s; font-family:inherit; }
-    .dt-chip:hover { border-color:#5865f2; } .dt-chip.active { background:rgba(88,101,242,.15); border-color:#5865f2; color:#fff; }
-    .dt-n-msg-arrow {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-right: 4px;
-      vertical-align: -1px;
-      pointer-events: none;
-    }
-    .dt-adv { display:none; padding:10px 16px; gap:8px; flex-wrap:wrap; align-items:center; border-top:1px dashed #2b2d31; margin-top:2px; }
-    .dt-adv.open { display:flex; }
-    .dt-adv label { font-size:11px; color:#b5bac1; display:flex; align-items:center; gap:4px; }
+    .dt-bar input, .dt-bar select { background:#1e1f22; color:#dbdee1; border:1px solid #2b2d31; border-radius:4px; padding:6px 8px; font-size:12px; outline:none; font-family:inherit; } .dt-bar input:focus, .dt-bar select:focus { border-color:#5865f2; }
+    .dt-btn { background:#4e5058; color:#fff; border:none; border-radius:4px; padding:6px 10px; font-size:12px; font-weight:600; cursor:pointer; transition:background .15s; font-family:inherit; } .dt-btn:hover { background:#6d6f78; } .dt-btn.red { background:#da373c; } .dt-btn.red:hover { background:#a12d31; } .dt-btn.blue { background:#5865f2; } .dt-btn.blue:hover { background:#4752c4; } .dt-btn:disabled { opacity:.45; cursor:not-allowed; }
+    .dt-chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 10px; flex-shrink:0; align-items:center; }
+    .dt-chip { background:#1e1f22; color:#b5bac1; border:1px solid #2b2d31; border-radius:99px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; transition:all .12s; font-family:inherit; } .dt-chip:hover { border-color:#5865f2; } .dt-chip.active { background:rgba(88,101,242,.15); border-color:#5865f2; color:#fff; }
+    .dt-selall-label { cursor:pointer; font-size:11px; color:#b5bac1; background:#1e1f22; border:1px solid #2b2d31; border-radius:8px; padding:5px 8px; display:flex; align-items:center; gap:6px; font-weight:600; user-select:none; transition:border-color .15s; order:-1; margin-right:4px; } .dt-selall-label:hover { border-color:#5865f2; color:#fff; } .dt-selall-label input:checked + span { color: #fff; }
+    .dt-adv { display:none; padding:10px 16px; gap:8px; flex-wrap:wrap; align-items:center; border-top:1px dashed #2b2d31; margin-top:2px; } .dt-adv.open { display:flex; } .dt-adv label { font-size:11px; color:#b5bac1; display:flex; align-items:center; gap:4px; }
     .dt-list { flex:1; overflow-y:auto; padding:6px 10px; background:#2b2d31; border-top:1px solid #1e1f22; }
-    .dt-row { display:flex; align-items:center; gap:10px; padding:8px; border-radius:6px; cursor:pointer; border-bottom:1px solid #313338; transition:background .12s; }
-    .dt-row:hover { background:#35373c; } .dt-row.sel { background:rgba(218,55,60,.15); }
+    .dt-row { display:flex; align-items:center; gap:10px; padding:8px; border-radius:6px; cursor:pointer; border-bottom:1px solid #313338; transition:background .12s; } .dt-row:hover { background:#35373c; } .dt-row.sel { background:rgba(218,55,60,.15); }
     .dt-cb { accent-color:#da373c; width:16px; height:16px; flex-shrink:0; cursor:pointer; }
     .dt-av { width:40px; height:40px; border-radius:50%; flex-shrink:0; background:#1e1f22; object-fit:cover; cursor:pointer; }
-    .dt-av-ph { display:flex; align-items:center; justify-content:center; font-size:20px; background:#5865f2; }
-    .dt-av-ph.solo { background:#faa61a; }
+    .dt-av-ph { display:flex; align-items:center; justify-content:center; font-size:20px; background:#5865f2; } .dt-av-ph.solo { background:#faa61a; }
     .dt-info { flex:1; min-width:0; }
-    .dt-name { font-size:14px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:fit-content; max-width:100%; cursor:pointer; }
-    .dt-name:hover { text-decoration:underline; }
-    .dt-name span { font-weight:400; color:#b5bac1; font-size:12px; margin-left:6px; }
+    .dt-name { font-size:14px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:fit-content; max-width:100%; cursor:pointer; } .dt-name:hover { text-decoration:underline; } .dt-name span { font-weight:400; color:#b5bac1; font-size:12px; margin-left:6px; }
     .dt-sub { font-size:11px; color:#b5bac1; margin-top:2px; }
-    .dt-badges { display:flex; gap:4px; flex-shrink:0; }
-    .dt-badge { font-size:11px; padding:1px 5px; border-radius:4px; line-height:1.4; }
-    .dt-actions { display:flex; gap:6px; flex-shrink:0; }
-.dt-dm, .dt-open { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; font-family:inherit; display:inline-flex; align-items:center; justify-content:center; }
-    .dt-dm:hover, .dt-open:hover { border-color:#5865f2; color:#5865f2; } .dt-dm.loading, .dt-open.loading { opacity:.6; cursor:wait; }
-    .dt-rm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
-    .dt-rm:hover { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); }
-    .dt-rm.armed { border-color:#da373c; color:#fff; background:#da373c; }
-    .dt-rm.loading { opacity:.6; cursor:wait; } .dt-rm.err { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.15); }
-    .dt-cl { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; }
-    .dt-cl:hover { border-color:#5865f2; color:#5865f2; background:rgba(88,101,242,.08); }
-    .dt-cl.armed { border-color:#5865f2; color:#fff; background:#5865f2; }
-    .dt-cl.loading { opacity:.6; cursor:wait; }
+    .dt-badges { display:flex; gap:4px; flex-shrink:0; } .dt-badge { font-size:11px; padding:1px 5px; border-radius:4px; line-height:1.4; }
+    .dt-actions { display:flex; gap:4px; flex-shrink:0; }
+    .dt-dm, .dt-open, .dt-s-mute, .dt-s-settings { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:13px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; font-family:inherit; display:inline-flex; align-items:center; justify-content:center; min-width:32px; }
+    .dt-dm:hover, .dt-open:hover, .dt-s-mute:hover, .dt-s-settings:hover { border-color:#5865f2; color:#5865f2; }
+    .dt-s-mute.on { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); }
+    .dt-rm { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:74px; font-family:inherit; } .dt-rm:hover { border-color:#da373c; color:#da373c; background:rgba(218,55,60,.08); } .dt-rm.armed { border-color:#da373c; color:#fff; background:#da373c; } .dt-rm.loading { opacity:.6; cursor:wait; } .dt-rm.err { border-color:#da373c; color:#da373c; }
+    .dt-cl { background:transparent; border:1px solid #4e5058; color:#b5bac1; font-size:12px; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:600; transition:all .12s; min-width:84px; font-family:inherit; } .dt-cl:hover { border-color:#5865f2; color:#5865f2; background:rgba(88,101,242,.08); } .dt-cl.armed { border-color:#5865f2; color:#fff; background:#5865f2; } .dt-cl.loading { opacity:.6; cursor:wait; }
     .dt-foot { padding:10px 16px; border-top:1px solid #1e1f22; display:flex; align-items:center; gap:10px; flex-shrink:0; flex-wrap:wrap; }
     .dt-status { flex:1; font-size:12px; color:#b5bac1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:120px; }
-    .dt-silent { cursor:pointer; font-size:12px; color:#dbdee1; background:#1e1f22; border:1px solid #2b2d31; border-radius:4px; padding:5px 8px; display:flex; align-items:center; gap:6px; }
-    .dt-silent:hover { border-color:#5865f2; }
-    .dt-footbar { width:100%; height:6px; background:#1e1f22; border-radius:99px; overflow:hidden; margin-top:6px; display:none; }
-    .dt-footbar.visible { display:block; }
+    .dt-silent { cursor:pointer; font-size:12px; color:#dbdee1; background:#1e1f22; border:1px solid #2b2d31; border-radius:4px; padding:5px 8px; display:flex; align-items:center; gap:6px; } .dt-silent:hover { border-color:#5865f2; }
+    .dt-footbar { width:100%; height:6px; background:#1e1f22; border-radius:99px; overflow:hidden; margin-top:6px; display:none; } .dt-footbar.visible { display:block; }
     .dt-footbar > div { height:100%; width:0%; background:linear-gradient(90deg,#da373c,#ff6b6b); border-radius:99px; transition:width .4s ease; }
     .dt-footbar-clean > div { background:linear-gradient(90deg,#5865f2,#8891ff); }
-    .dt-clean-label {
-      width:100%; font-size:11px; color:#8891ff; font-weight:600;
-      margin-top:6px; margin-bottom:2px; overflow:hidden;
-      text-overflow:ellipsis; white-space:nowrap;
-    }
+    .dt-clean-label { width:100%; font-size:11px; color:#8891ff; font-weight:600; margin-top:6px; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .dt-clean-label #dt-clean-name { color:#fff; }
     .dt-empty { text-align:center; color:#b5bac1; padding:30px; font-size:13px; }
-
-    .dt-hist-meta { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
-    .dt-hist-tag { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600; background:rgba(88,101,242,.12); color:#8891ff; border:1px solid rgba(88,101,242,.3); }
-    .dt-hist-tag.green { background:rgba(35,165,90,.12); color:#57f287; border-color:rgba(35,165,90,.3); }
-    .dt-hist-tag.orange { background:rgba(250,166,26,.12); color:#faa61a; border-color:rgba(250,166,26,.3); }
-    .dt-hist-tag.grey { background:rgba(181,186,193,.1); color:#b5bac1; border-color:rgba(181,186,193,.25); }
-    .dt-hist-tag.friend { background:rgba(218,55,60,.12); color:#ff8189; border-color:rgba(218,55,60,.3); }
-    .dt-hist-tag.group { background:rgba(88,101,242,.12); color:#8891ff; border-color:rgba(88,101,242,.3); }
-    .dt-hist-tag.notfriend { background:rgba(35,165,90,.12); color:#57f287; border-color:rgba(35,165,90,.3); }
-    .dt-hist-date { font-size:10px; color:#6d6f78; margin-top:3px; }
-    #__dt_box .dt-hrow { cursor:default; }
-
-    /* ── Scrollbar bleue minimaliste ── */
-    .dt-list::-webkit-scrollbar {
-      width: 6px;
-    }
-    .dt-list::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .dt-list::-webkit-scrollbar-thumb {
-      background: #5865f2;
-      border-radius: 99px;
-      cursor: pointer;
-    }
-    .dt-list::-webkit-scrollbar-thumb:hover {
-      background: #4752c4;
-    }
+    .dt-hist-meta { display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; } .dt-hist-tag { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600; background:rgba(88,101,242,.12); color:#8891ff; border:1px solid rgba(88,101,242,.3); }
+    .dt-hist-tag.green { background:rgba(35,165,90,.12); color:#57f287; border-color:rgba(35,165,90,.3); } .dt-hist-tag.orange { background:rgba(250,166,26,.12); color:#faa61a; border-color:rgba(250,166,26,.3); } .dt-hist-tag.grey { background:rgba(181,186,193,.1); color:#b5bac1; border-color:rgba(181,186,193,.25); }
+    .dt-hist-tag.friend { background:rgba(218,55,60,.12); color:#ff8189; border-color:rgba(218,55,60,.3); } .dt-hist-tag.group { background:rgba(88,101,242,.12); color:#8891ff; border-color:rgba(88,101,242,.3); } .dt-hist-tag.notfriend { background:rgba(35,165,90,.12); color:#57f287; border-color:rgba(35,165,90,.3); } .dt-hist-tag.server { background:rgba(88,101,242,.12); color:#8891ff; border-color:rgba(88,101,242,.3); }
+    .dt-hist-date { font-size:10px; color:#6d6f78; margin-top:3px; } #__dt_box .dt-hrow { cursor:default; }
+    .dt-list::-webkit-scrollbar { width: 6px; } .dt-list::-webkit-scrollbar-track { background: transparent; } .dt-list::-webkit-scrollbar-thumb { background: #5865f2; border-radius: 99px; cursor: pointer; } .dt-list::-webkit-scrollbar-thumb:hover { background: #4752c4; }
   `;
   document.head.append(style);
 
-  // ── Loading modal ───────────────────────────────────────
   function showLoadingModal(text = 'Loading Discord Tools…') {
-    document.getElementById('__dt_loading')?.remove();
-    stopLoadingTicker();
-    _loadCurrent = 0;
-    _loadTarget = 0;
-    _loadBaseText = text;
-    const ov = document.createElement('div');
-    ov.id = '__dt_loading';
-    Object.assign(ov.style, {
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
-      zIndex: '100002', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: '"gg sans","Noto Sans",sans-serif',
-      backdropFilter: 'blur(4px)',
-    });
-    const card = document.createElement('div');
-    Object.assign(card.style, {
-      background: '#313338', borderRadius: '14px', padding: '28px 36px',
-      width: '360px', maxWidth: '92vw', color: '#dbdee1', textAlign: 'center',
-      boxShadow: '0 16px 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px',
-    });
-
-    const logo = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    logo.setAttribute('viewBox', '0 0 127.14 96.36');
-    logo.setAttribute('width', '42');
-    logo.setAttribute('height', '42');
-    logo.setAttribute('fill', '#5865f2');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', 'M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z');
-    logo.append(path);
-
-    const title = document.createElement('div');
-    title.textContent = 'Discord Tools';
-    Object.assign(title.style, { fontSize: '17px', fontWeight: '700', color: '#fff' });
-
-    const status = document.createElement('div');
-    status.id = '__dt_loading_status';
-    status.textContent = text;
-    Object.assign(status.style, { fontSize: '13px', color: '#b5bac1', minHeight: '18px' });
-
-    const barTrack = document.createElement('div');
-    Object.assign(barTrack.style, { width: '100%', height: '6px', background: '#1e1f22', borderRadius: '99px', overflow: 'hidden' });
-    const barFill = document.createElement('div');
-    barFill.id = '__dt_loading_fill';
-    Object.assign(barFill.style, {
-      height: '100%', width: '0%', borderRadius: '99px',
-      background: 'linear-gradient(90deg,#5865f2,#8891ff)',
-    });
-    barTrack.append(barFill);
-
-    card.append(logo, title, status, barTrack);
-    ov.append(card);
-    document.body.append(ov);
+    document.getElementById('__dt_loading')?.remove(); stopLoadingTicker(); _loadCurrent = 0; _loadTarget = 0; _loadBaseText = text;
+    const ov = document.createElement('div'); ov.id = '__dt_loading'; Object.assign(ov.style, { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: '100002', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '"gg sans","Noto Sans",sans-serif', backdropFilter: 'blur(4px)' });
+    const card = document.createElement('div'); Object.assign(card.style, { background: '#313338', borderRadius: '14px', padding: '28px 36px', width: '360px', maxWidth: '92vw', color: '#dbdee1', textAlign: 'center', boxShadow: '0 16px 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '18px' });
+    const logo = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); logo.setAttribute('viewBox', '0 0 127.14 96.36'); logo.setAttribute('width', '42'); logo.setAttribute('height', '42'); logo.setAttribute('fill', '#5865f2');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', 'M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z'); logo.append(path);
+    const title = document.createElement('div'); title.textContent = 'Discord Tools'; Object.assign(title.style, { fontSize: '17px', fontWeight: '700', color: '#fff' });
+    const status = document.createElement('div'); status.id = '__dt_loading_status'; status.textContent = text; Object.assign(status.style, { fontSize: '13px', color: '#b5bac1', minHeight: '18px' });
+    const barTrack = document.createElement('div'); Object.assign(barTrack.style, { width: '100%', height: '6px', background: '#1e1f22', borderRadius: '99px', overflow: 'hidden' });
+    const barFill = document.createElement('div'); barFill.id = '__dt_loading_fill'; Object.assign(barFill.style, { height: '100%', width: '0%', borderRadius: '99px', background: 'linear-gradient(90deg,#5865f2,#8891ff)' });
+    barTrack.append(barFill); card.append(logo, title, status, barTrack); ov.append(card); document.body.append(ov);
   }
-  function _renderLoadingText() {
-    const s = document.getElementById('__dt_loading_status');
-    if (!s) return;
-    const dots = '.'.repeat((Math.floor(Date.now() / 350) % 4));
-    s.textContent = _loadBaseText + dots;
-  }
-
+  function _renderLoadingText() { const s = document.getElementById('__dt_loading_status'); if (!s) return; const dots = '.'.repeat((Math.floor(Date.now() / 350) % 4)); s.textContent = _loadBaseText + dots; }
   function setLoadingStep(text, pct) {
-    _loadBaseText = text;
-    if (typeof pct === 'number') {
-      _loadTarget = Math.max(_loadTarget, Math.max(0, Math.min(100, pct)));
-    }
-    const s = document.getElementById('__dt_loading_status');
-    if (s) s.textContent = text;
-
-    if (!_loadTicker) {
-      _loadTicker = setInterval(() => {
-        const f = document.getElementById('__dt_loading_fill');
-        if (!f) { clearInterval(_loadTicker); _loadTicker = null; return; }
-        const diff = _loadTarget - _loadCurrent;
-        if (Math.abs(diff) < 0.1) {
-          _loadCurrent = _loadTarget;
-        } else {
-          _loadCurrent += diff * 0.08;
-        }
-        f.style.width = _loadCurrent.toFixed(2) + '%';
-      }, 30);
-    }
-    if (!_loadDotsTimer) {
-      _loadDotsTimer = setInterval(_renderLoadingText, 300);
-    }
+    _loadBaseText = text; if (typeof pct === 'number') _loadTarget = Math.max(_loadTarget, Math.max(0, Math.min(100, pct)));
+    const s = document.getElementById('__dt_loading_status'); if (s) s.textContent = text;
+    if (!_loadTicker) _loadTicker = setInterval(() => { const f = document.getElementById('__dt_loading_fill'); if (!f) { clearInterval(_loadTicker); _loadTicker = null; return; } const diff = _loadTarget - _loadCurrent; if (Math.abs(diff) < 0.1) _loadCurrent = _loadTarget; else _loadCurrent += diff * 0.08; f.style.width = _loadCurrent.toFixed(2) + '%'; }, 30);
+    if (!_loadDotsTimer) _loadDotsTimer = setInterval(_renderLoadingText, 300);
   }
-
-  function stopLoadingTicker() {
-    if (_loadTicker) { clearInterval(_loadTicker); _loadTicker = null; }
-    if (_loadDotsTimer) { clearInterval(_loadDotsTimer); _loadDotsTimer = null; }
-  }
-  function hideLoadingModal() {
-    const ov = document.getElementById('__dt_loading');
-    if (!ov) return;
-    stopLoadingTicker();
-    const f = document.getElementById('__dt_loading_fill');
-    if (f) f.style.width = '100%';
-    ov.style.transition = 'opacity .25s ease';
-    ov.style.opacity = '0';
-    setTimeout(() => ov.remove(), 260);
-  }
+  function stopLoadingTicker() { if (_loadTicker) { clearInterval(_loadTicker); _loadTicker = null; } if (_loadDotsTimer) { clearInterval(_loadDotsTimer); _loadDotsTimer = null; } }
+  function hideLoadingModal() { const ov = document.getElementById('__dt_loading'); if (!ov) return; stopLoadingTicker(); const f = document.getElementById('__dt_loading_fill'); if (f) f.style.width = '100%'; ov.style.transition = 'opacity .25s ease'; ov.style.opacity = '0'; setTimeout(() => ov.remove(), 260); }
 
   // ── Build window ────────────────────────────────────────
-  const box = document.createElement('div');
-  box.id = '__dt_box';
+  const box = document.createElement('div'); box.id = '__dt_box';
   box.innerHTML = `
     <div class="dt-head">
       <button class="dt-min" title="Collapse"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"/></svg></button>
       <button class="dt-refresh" title="Reload Discord Tools"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg></button>
-      <svg class="dt-logo" viewBox="0 0 127.14 96.36" fill="currentColor" aria-hidden="true">
-        <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"/>
-      </svg>
+      <svg class="dt-logo" viewBox="0 0 127.14 96.36" fill="currentColor" aria-hidden="true"><path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z"/></svg>
       <div class="dt-title">Discord Tools</div>
       <div class="dt-tabs">
         <button class="dt-tab active" data-tab="friends">👥 Friends <span class="dt-tabcount" id="dt-fcount">${friends.length}</span></button>
         <button class="dt-tab" data-tab="groups">👥 Groups <span class="dt-tabcount" id="dt-gcount">${groups.length}</span></button>
         <button class="dt-tab" data-tab="notfriends">💬 Not Friends <span class="dt-tabcount" id="dt-ncount">${notFriends.length}</span></button>
+        <button class="dt-tab" data-tab="servers">🌐 Servers <span class="dt-tabcount" id="dt-scount">${servers.length}</span></button>
         <button class="dt-tab" data-tab="history">📜 History <span class="dt-tabcount" id="dt-hcount">${history.length}</span></button>
       </div>
       <button class="dt-x" title="Close">✕</button>
     </div>
     <div class="dt-body">
-
-      <!-- ══════════ FRIENDS PANEL ══════════ -->
       <div class="dt-panel active" data-panel="friends">
         <div class="dt-bar">
           <input id="dt-f-q" placeholder="🔍 Search username / ID" style="flex:1;min-width:150px">
-          <select id="dt-f-sort" title="Sort by">
-            <option value="added">Date added</option>
-            <option value="name">Name</option>
-            <option value="created">Account created</option>
-            <option value="lastdm">Last DM</option>
-          </select>
+          <select id="dt-f-sort" title="Sort by"><option value="added">Date added</option><option value="name">Name</option><option value="created">Account created</option><option value="lastdm">Last DM</option></select>
           <button class="dt-btn" id="dt-f-dir" style="min-width:32px;font-size:14px;padding:4px 8px">↓</button>
-          <label style="cursor:pointer;font-size:12px;color:#dbdee1;background:#1e1f22;border:1px solid #2b2d31;border-radius:4px;padding:5px 8px">
-            <input type="checkbox" id="dt-f-selall" class="dt-cb" style="width:14px;height:14px"> Select all
-          </label>
-          <button class="dt-btn" id="dt-f-adv-toggle" style="font-size:14px;padding:4px 10px">⚙</button>
+          <button class="dt-btn" id="dt-f-adv-toggle" style="font-size:14px;padding:4px 10px">⚙️</button>
         </div>
         <div class="dt-chips" id="dt-f-chips">
-          <button class="dt-chip active" data-chip="all">All</button>
-          <button class="dt-chip" data-chip="newacct">🆕 New accounts</button>
-          <button class="dt-chip" data-chip="noavatar">👻 No avatar</button>
-          <button class="dt-chip" data-chip="fresh">🌱 Fresh friends</button>
-          <button class="dt-chip" data-chip="long">⏳ Long-time</button>
-          <button class="dt-chip" data-chip="status" id="dt-f-status-toggle">
-            <span class="dt-n-msg-arrow" id="dt-f-status-arrow" style="display:none">
-              <svg ...></svg>
-            </span>
-            <span id="dt-f-status-label">🟢 Online</span>
-          </button>
+          <button class="dt-chip active" data-chip="all">All</button><button class="dt-chip" data-chip="newacct">🆕 New accounts</button><button class="dt-chip" data-chip="noavatar">👻 No avatar</button><button class="dt-chip" data-chip="fresh">🌱 Fresh friends</button><button class="dt-chip" data-chip="long">⏳ Long-time</button>
+          <button class="dt-chip" data-chip="status" id="dt-f-status-toggle"><span class="dt-n-msg-arrow" id="dt-f-status-arrow" style="display:none"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg></span><span id="dt-f-status-label">🟢 Online</span></button>
+          <label class="dt-selall-label"><input type="checkbox" id="dt-f-selall" class="dt-cb" style="width:14px;height:14px"> <span>Select all</span></label>
         </div>
-        <div class="dt-adv" id="dt-f-adv">
-          <label>Added after <input type="date" id="dt-f-from"></label>
-          <label>before <input type="date" id="dt-f-to"></label>
-          <select id="dt-f-av">
-            <option value="all">All avatars</option>
-            <option value="def">Default avatar</option>
-            <option value="custom">Custom avatar</option>
-          </select>
-        </div>
+        <div class="dt-adv" id="dt-f-adv"><label>Added after <input type="date" id="dt-f-from"></label><label>before <input type="date" id="dt-f-to"></label><select id="dt-f-av"><option value="all">All avatars</option><option value="def">Default avatar</option><option value="custom">Custom avatar</option></select></div>
         <div class="dt-list" id="dt-f-list"></div>
       </div>
-
-      <!-- ══════════ GROUPS PANEL ══════════ -->
       <div class="dt-panel" data-panel="groups">
         <div class="dt-bar">
           <input id="dt-g-q" placeholder="🔍 Search name / member / ID" style="flex:1;min-width:150px">
-          <select id="dt-g-sort" title="Sort by">
-            <option value="created">Date created</option>
-            <option value="activity">Last activity</option>
-            <option value="name">Name</option>
-            <option value="members">Members</option>
-          </select>
+          <select id="dt-g-sort" title="Sort by"><option value="created">Date created</option><option value="activity">Last activity</option><option value="name">Name</option><option value="members">Members</option></select>
           <button class="dt-btn" id="dt-g-dir" style="min-width:32px;font-size:14px;padding:4px 8px">↓</button>
-          <label style="cursor:pointer;font-size:12px;color:#dbdee1;background:#1e1f22;border:1px solid #2b2d31;border-radius:4px;padding:5px 8px">
-            <input type="checkbox" id="dt-g-selall" class="dt-cb" style="width:14px;height:14px"> Select all
-          </label>
-          <button class="dt-btn" id="dt-g-adv-toggle" style="font-size:14px;padding:4px 10px">⚙</button>
+          <button class="dt-btn" id="dt-g-adv-toggle" style="font-size:14px;padding:4px 10px">⚙️</button>
         </div>
         <div class="dt-chips" id="dt-g-chips">
-          <button class="dt-chip active" data-chip="all">All</button>
-          <button class="dt-chip" data-chip="solo">👤 Solo</button>
-          <button class="dt-chip" data-chip="named">✏️ Named</button>
-          <button class="dt-chip" data-chip="inactive">💤 Inactive</button>
-          <button class="dt-chip" data-chip="new">🆕 Recent</button>
-          <button class="dt-chip" data-chip="old">⏳ Old</button>
+          <button class="dt-chip active" data-chip="all">All</button><button class="dt-chip" data-chip="solo">👤 Solo</button><button class="dt-chip" data-chip="named">✏️ Named</button><button class="dt-chip" data-chip="inactive">💤 Inactive</button><button class="dt-chip" data-chip="new">🆕 Recent</button><button class="dt-chip" data-chip="old">⏳ Old</button>
+          <label class="dt-selall-label"><input type="checkbox" id="dt-g-selall" class="dt-cb" style="width:14px;height:14px"> <span>Select all</span></label>
         </div>
-        <div class="dt-adv" id="dt-g-adv">
-          <label>Created after <input type="date" id="dt-g-from"></label>
-          <label>before <input type="date" id="dt-g-to"></label>
-          <select id="dt-g-ic">
-            <option value="all">All icons</option>
-            <option value="def">Default icon</option>
-            <option value="custom">Custom icon</option>
-          </select>
-        </div>
+        <div class="dt-adv" id="dt-g-adv"><label>Created after <input type="date" id="dt-g-from"></label><label>before <input type="date" id="dt-g-to"></label><select id="dt-g-ic"><option value="all">All icons</option><option value="def">Default icon</option><option value="custom">Custom icon</option></select></div>
         <div class="dt-list" id="dt-g-list"></div>
       </div>
-
-      <!-- ══════════ NOT FRIENDS PANEL ══════════ -->
       <div class="dt-panel" data-panel="notfriends">
         <div class="dt-bar">
           <input id="dt-n-q" placeholder="🔍 Search username / ID" style="flex:1;min-width:150px">
-          <select id="dt-n-sort" title="Sort by">
-            <option value="lastdm">Last DM</option>
-            <option value="name">Name</option>
-            <option value="created">Account created</option>
-            <option value="count">Message count</option>
-          </select>
+          <select id="dt-n-sort" title="Sort by"><option value="lastdm">Last DM</option><option value="name">Name</option><option value="created">Account created</option><option value="count">Message count</option></select>
           <button class="dt-btn" id="dt-n-dir" style="min-width:32px;font-size:14px;padding:4px 8px">↓</button>
-          <label style="cursor:pointer;font-size:12px;color:#dbdee1;background:#1e1f22;border:1px solid #2b2d31;border-radius:4px;padding:5px 8px">
-            <input type="checkbox" id="dt-n-selall" class="dt-cb" style="width:14px;height:14px"> Select all
-          </label>
+          <button class="dt-btn" id="dt-n-rescan" title="Re-scan messages">🔄 Rescan</button>
         </div>
         <div class="dt-chips" id="dt-n-chips">
-          <button class="dt-chip active" data-chip="all">All</button>
-          <button class="dt-chip" data-chip="withmsg" id="dt-n-msg-toggle">
-            <span class="dt-n-msg-arrow" id="dt-n-msg-arrow" style="display:none">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg>
-            </span>
-            <span id="dt-n-msg-label">💬 With my messages</span>
-          </button>
-          <button class="dt-chip" data-chip="empty">📭 Empty</button>
-          <button class="dt-chip" data-chip="newacct">🆕 New accounts</button>
-          <button class="dt-chip" data-chip="noavatar">👻 No avatar</button>
-          <button class="dt-chip" data-chip="status" id="dt-n-status-toggle">
-            <span class="dt-n-msg-arrow" id="dt-n-status-arrow" style="display:none">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg>
-            </span>
-            <span id="dt-n-status-label">🟢 Online</span>
-          </button>
+          <button class="dt-chip active" data-chip="all">All</button><button class="dt-chip" data-chip="withmsg" id="dt-n-msg-toggle"><span class="dt-n-msg-arrow" id="dt-n-msg-arrow" style="display:none"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg></span><span id="dt-n-msg-label">💬 With my messages</span></button>
+          <button class="dt-chip" data-chip="empty">📭 Empty</button><button class="dt-chip" data-chip="newacct">🆕 New accounts</button><button class="dt-chip" data-chip="noavatar">👻 No avatar</button>
+          <button class="dt-chip" data-chip="status" id="dt-n-status-toggle"><span class="dt-n-msg-arrow" id="dt-n-status-arrow" style="display:none"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 3 8 7 12"/><line x1="3" y1="8" x2="21" y2="8"/><polyline points="17 12 21 16 17 20"/><line x1="21" y1="16" x2="3" y2="16"/></svg></span><span id="dt-n-status-label">🟢 Online</span></button>
+          <label class="dt-selall-label"><input type="checkbox" id="dt-n-selall" class="dt-cb" style="width:14px;height:14px"> <span>Select all</span></label>
         </div>
         <div class="dt-list" id="dt-n-list"></div>
       </div>
-
-      <!-- ══════════ HISTORY PANEL ══════════ -->
+      <div class="dt-panel" data-panel="servers">
+        <div class="dt-bar">
+          <input id="dt-s-q" placeholder="🔍 Search server name / ID" style="flex:1;min-width:150px">
+          <select id="dt-s-sort" title="Sort by"><option value="default">Discord order</option><option value="name">Name</option><option value="created">Date joined</option></select>
+          <button class="dt-btn" id="dt-s-dir" style="min-width:32px;font-size:14px;padding:4px 8px">↓</button>
+          <button class="dt-btn" id="dt-s-rescan" title="Re-scan muted/notifs for all servers">🔄 Rescan</button>
+        </div>
+        <div class="dt-chips" id="dt-s-chips">
+          <button class="dt-chip active" data-chip="all">All</button><button class="dt-chip" data-chip="owned">👑 Owned</button><button class="dt-chip" data-chip="muted">🔕 Muted</button><button class="dt-chip" data-chip="unmuted">🔔 Unmuted</button><button class="dt-chip" data-chip="recent">🆕 Recent</button><button class="dt-chip" data-chip="old">⏳ Old</button>
+          <label class="dt-selall-label"><input type="checkbox" id="dt-s-selall" class="dt-cb" style="width:14px;height:14px"> <span>Select all</span></label>
+        </div>
+        <div class="dt-list" id="dt-s-list"></div>
+      </div>
       <div class="dt-panel" data-panel="history">
         <div class="dt-bar">
           <input id="dt-hq" placeholder="🔍 Search in history" style="flex:1;min-width:150px">
-          <select id="dt-hfilter" title="Filter by type">
-            <option value="all">All types</option>
-            <option value="friend">👤 Friends only</option>
-            <option value="group">👥 Groups only</option>
-            <option value="notfriend">💬 Not-friends only</option>
-          </select>
+          <select id="dt-hfilter" title="Filter by type"><option value="all">All types</option><option value="friend">👤 Friends</option><option value="group">👥 Groups</option><option value="notfriend">💬 Not-friends</option><option value="server">🌐 Servers</option></select>
           <span id="dt-hstats" style="font-size:11px;color:#949ba4"></span>
           <button class="dt-btn red" id="dt-hclear" title="Clear all history">🗑 Clear</button>
         </div>
         <div class="dt-list" id="dt-hlist"></div>
       </div>
-
     </div>
     <div class="dt-foot" id="dt-foot">
       <div class="dt-status" id="dt-status"></div>
-      <label class="dt-silent" id="dt-silent-wrap" title="No notification will be sent to the other members" style="display:none">
-        <input type="checkbox" id="dt-silent" class="dt-cb" style="width:14px;height:14px;accent-color:#5865f2"> 🔇 Silent
-      </label>
+      <label class="dt-silent" id="dt-silent-wrap" title="No notification will be sent to the other members" style="display:none"><input type="checkbox" id="dt-silent" class="dt-cb" style="width:14px;height:14px;accent-color:#5865f2"> 🔇 Silent</label>
+      <button class="dt-btn blue" id="dt-s-bulk-settings" style="display:none">⚙️️ Bulk Settings</button>
+      <button class="dt-btn blue" id="dt-s-mute-all" style="display:none">🔕 Mute</button>
+      <button class="dt-btn" id="dt-s-unmute-all" style="display:none">🔔 Unmute</button>
       <button class="dt-btn red" id="dt-del" disabled>🗑 Remove selected</button>
       <div class="dt-footbar" id="dt-footbar"><div></div></div>
-      <div class="dt-clean-label" id="dt-clean-label" style="display:none">
-        🧹 <span id="dt-clean-name"></span> — <span id="dt-clean-counter">0/0</span> messages
-      </div>
-      <div class="dt-footbar dt-footbar-clean" id="dt-footbar-clean" style="display:none">
-        <div id="dt-footbar-clean-fill"></div>
-      </div>
+      <div class="dt-clean-label" id="dt-clean-label" style="display:none">🧹 <span id="dt-clean-name"></span> — <span id="dt-clean-counter">0/0</span> messages</div>
+      <div class="dt-footbar dt-footbar-clean" id="dt-footbar-clean" style="display:none"><div id="dt-footbar-clean-fill"></div></div>
     </div>`;
   document.body.append(box);
 
   const $ = id => box.querySelector('#' + id);
+  const VALID_TABS = ['friends', 'groups', 'notfriends', 'servers', 'history'];
+  let busy = false, activeTab = VALID_TABS.includes(prefs.activeTab) ? prefs.activeTab : 'friends';
+  let visibleFriends = [], visibleGroups = [], visibleNotFriends = [], visibleServers = [];
+  let sortDirFriend = prefs.dirFriend === 'asc' ? 'asc' : 'desc', sortDirGroup = prefs.dirGroup === 'asc' ? 'asc' : 'desc', sortDirNotFriends = prefs.dirNotFriends === 'asc' ? 'asc' : 'desc', sortDirServer = prefs.dirServer === 'asc' ? 'asc' : 'desc';
+  let activeChipFriend = prefs.chipFriend || 'all', statusFilterFriend = prefs.statusFilterFriend || 'online', activeChipGroup = prefs.chipGroup || 'all', activeChipNotFriends = prefs.chipNotFriends || 'all', statusFilterNotFriends = prefs.statusFilterNotFriends || 'online', notFriendsMsgMode = prefs.notFriendsMsgMode || 'with', activeChipServer = prefs.chipServer || 'all';
 
-  let busy = false, activeTab = prefs.activeTab || 'friends';
-  let visibleFriends = [], visibleGroups = [], visibleNotFriends = [];
-  let sortDirFriend = prefs.dirFriend === 'asc' ? 'asc' : 'desc';
-  let sortDirGroup  = prefs.dirGroup  === 'asc' ? 'asc' : 'desc';
-  let sortDirNotFriends = prefs.dirNotFriends === 'asc' ? 'asc' : 'desc';
-  let activeChipFriend = prefs.chipFriend || 'all';   // 'all' | 'newacct' | 'noavatar' | 'fresh' | 'long' | 'status'
-  let statusFilterFriend = prefs.statusFilterFriend || 'online';  // 'online' | 'idle' | 'dnd' | 'offline'
-  let activeChipGroup  = prefs.chipGroup  || 'all';
-  let activeChipNotFriends = prefs.chipNotFriends || 'all';
-  let statusFilterNotFriends = prefs.statusFilterNotFriends || 'online';  // 'online' | 'idle' | 'dnd' | 'offline'
-  let notFriendsMsgMode = prefs.notFriendsMsgMode || 'with';
+  const statusEl = $('dt-status'), delBtn = $('dt-del'), silentCb = $('dt-silent'), silentWrap = $('dt-silent-wrap'), footEl = $('dt-foot');
+  const footbar = $('dt-footbar'), footbarFill = footbar.firstElementChild;
+  const footbarClean = $('dt-footbar-clean'), footbarCleanFill = footbarClean.firstElementChild;
+  const cleanLabel = $('dt-clean-label'), cleanNameEl = $('dt-clean-name'), cleanCounterEl = $('dt-clean-counter');
+  const fListEl = $('dt-f-list'), gListEl = $('dt-g-list'), hListEl = $('dt-hlist'), nListEl = $('dt-n-list'), sListEl = $('dt-s-list');
 
-  const statusEl   = $('dt-status');
-  const delBtn     = $('dt-del');
-  const silentCb   = $('dt-silent');
-  const silentWrap = $('dt-silent-wrap');
-  const footEl     = $('dt-foot');
-  const footbar    = $('dt-footbar');
-  const footbarFill = footbar.firstElementChild;
-  const footbarClean = $('dt-footbar-clean');
-  const footbarCleanFill = footbarClean.firstElementChild;
-  const cleanLabel = $('dt-clean-label');
-  const cleanNameEl = $('dt-clean-name');
-  const cleanCounterEl = $('dt-clean-counter');
-  const fListEl = $('dt-f-list'), gListEl = $('dt-g-list'), hListEl = $('dt-hlist'), nListEl = $('dt-n-list');
+  $('dt-f-sort').value = prefs.sortFriend || 'added'; $('dt-f-av').value = prefs.avFriend || 'all';
+  if (prefs.fromFriend) $('dt-f-from').value = prefs.fromFriend; if (prefs.toFriend) $('dt-f-to').value = prefs.toFriend;
+  function updateFriendDirLabel() { const key = $('dt-f-sort').value; const btn = $('dt-f-dir'); btn.textContent = sortDirFriend === 'asc' ? '↑' : '↓'; btn.title = key !== 'name' ? (sortDirFriend === 'asc' ? "Plus ancien d'abord" : 'Plus récent d’abord') : (sortDirFriend === 'asc' ? 'A → Z' : 'Z → A'); }
+  function updateGroupDirLabel() { const key = $('dt-g-sort').value; const btn = $('dt-g-dir'); btn.textContent = sortDirGroup === 'asc' ? '↑' : '↓'; btn.title = ['created', 'activity'].includes(key) ? (sortDirGroup === 'asc' ? "Plus ancien d'abord" : 'Plus récent d’abord') : (sortDirGroup === 'asc' ? 'A → Z' : 'Z → A'); }
+  function updateNotFriendsDirLabel() { const key = $('dt-n-sort').value; const btn = $('dt-n-dir'); btn.textContent = sortDirNotFriends === 'asc' ? '↑' : '↓'; btn.title = ['lastdm', 'created'].includes(key) ? (sortDirNotFriends === 'asc' ? "Plus ancien d'abord" : 'Plus récent d’abord') : (sortDirNotFriends === 'asc' ? 'A → Z' : 'Z → A'); }
+  function updateServerDirLabel() { const key = $('dt-s-sort').value; const btn = $('dt-s-dir'); btn.textContent = sortDirServer === 'asc' ? '↑' : '↓'; btn.title = key === 'default' ? (sortDirServer === 'asc' ? 'Ordre Discord inversé' : 'Ordre Discord') : (sortDirServer === 'asc' ? "Plus ancien d'abord" : 'Plus récent d’abord'); }
+  updateFriendDirLabel(); updateGroupDirLabel(); updateNotFriendsDirLabel(); updateServerDirLabel();
 
-  $('dt-f-sort').value = prefs.sortFriend || 'added';
-  $('dt-f-av').value   = prefs.avFriend || 'all';
-  if (prefs.fromFriend) $('dt-f-from').value = prefs.fromFriend;
-  if (prefs.toFriend)   $('dt-f-to').value   = prefs.toFriend;
-  $('dt-f-dir').textContent = sortDirFriend === 'desc' ? '↓' : '↑';
+  $('dt-g-sort').value = prefs.sortGroup || 'created'; $('dt-g-ic').value = prefs.icGroup || 'all';
+  if (prefs.fromGroup) $('dt-g-from').value = prefs.fromGroup; if (prefs.toGroup) $('dt-g-to').value = prefs.toGroup;
+  $('dt-n-sort').value = prefs.sortNotFriends || 'lastdm'; $('dt-s-sort').value = prefs.sortServer || 'default';
+  silentCb.checked = loadSilentPref(); silentCb.onchange = () => saveSilentPref(silentCb.checked);
 
-  $('dt-g-sort').value = prefs.sortGroup || 'created';
-  $('dt-g-ic').value   = prefs.icGroup || 'all';
-  if (prefs.fromGroup) $('dt-g-from').value = prefs.fromGroup;
-  if (prefs.toGroup)   $('dt-g-to').value   = prefs.toGroup;
-  $('dt-g-dir').textContent = sortDirGroup === 'desc' ? '↓' : '↑';
-
-  $('dt-n-sort').value = prefs.sortNotFriends || 'lastdm';
-  $('dt-n-dir').textContent = sortDirNotFriends === 'desc' ? '↓' : '↑';
-
-  silentCb.checked = loadSilentPref();
-  silentCb.onchange = () => saveSilentPref(silentCb.checked);
-
-  {
-    const labelEl = document.getElementById('dt-f-status-label');
-    if (labelEl && STATUS_FILTER_LABEL[statusFilterFriend]) {
-      const { icon, label } = STATUS_FILTER_LABEL[statusFilterFriend];
-      labelEl.textContent = `${icon} ${label}`;
-    }
-  }
-
-  // ✅ Restaure le chip actif dans Friends
-  box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.chip === activeChipFriend)
-  );
-
-  // 👁️ Cache la flèche du chip statut si le chip n'est pas actif
-  {
-    const arrowEl = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow');
-    if (arrowEl) arrowEl.style.display = (activeChipFriend === 'status') ? '' : 'none';
-  }
-
-  // Restaure les chips actifs dans Groups et Not Friends
-  box.querySelectorAll('#dt-g-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipGroup));
-  box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipNotFriends));
-
-  // Restaure le label du chip messages
-  {
-    const label = document.getElementById('dt-n-msg-label');
-    if (label) label.textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages';
-  }
-
-  // 👁️ Cache/affiche la flèche du chip "with messages" au boot
-  {
-    const arrowEl = document.getElementById('dt-n-msg-arrow');
-    if (arrowEl) arrowEl.style.display = (activeChipNotFriends === 'withmsg') ? '' : 'none';
-  }
-
-  // Restaure le label du chip statut Not Friends
-  {
-    const labelEl = document.getElementById('dt-n-status-label');
-    if (labelEl && STATUS_FILTER_LABEL[statusFilterNotFriends]) {
-      const { icon, label } = STATUS_FILTER_LABEL[statusFilterNotFriends];
-      labelEl.textContent = `${icon} ${label}`;
-    }
-  }
-
-  // 👁️ Cache/affiche la flèche du chip statut Not Friends
-  {
-    const arrowEl = document.getElementById('dt-n-status-arrow');
-    if (arrowEl) arrowEl.style.display = (activeChipNotFriends === 'status') ? '' : 'none';
-  }
-
-  const saveCurrentPrefs = () => savePrefs({
-    sortFriend: $('dt-f-sort').value, dirFriend: sortDirFriend,
-    avFriend: $('dt-f-av').value, fromFriend: $('dt-f-from').value, toFriend: $('dt-f-to').value,
-    chipFriend: activeChipFriend,
-    statusFilterFriend,
-    sortGroup: $('dt-g-sort').value, dirGroup: sortDirGroup,
-    icGroup: $('dt-g-ic').value, fromGroup: $('dt-g-from').value, toGroup: $('dt-g-to').value,
-    chipGroup: activeChipGroup,
-    sortNotFriends: $('dt-n-sort').value, dirNotFriends: sortDirNotFriends,
-    chipNotFriends: activeChipNotFriends,
-    statusFilterNotFriends,                          // 👈 AJOUTER
-    notFriendsMsgMode,
-    activeTab,
-  });
-
-  const head = box.querySelector('.dt-head');
-  let drag = null;
-  head.addEventListener('mousedown', e => {
-    if (e.target.closest('.dt-x, .dt-min, .dt-tab')) return;
-    const r = box.getBoundingClientRect();
-    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
-    head.style.cursor = 'grabbing';
-    e.preventDefault();
-  });
-  const onMove = e => {
-    if (!drag) return;
-    box.style.left = Math.min(Math.max(0, e.clientX - drag.dx), innerWidth - 60) + 'px';
-    box.style.top  = Math.min(Math.max(0, e.clientY - drag.dy), innerHeight - 40) + 'px';
+  const initChipState = () => {
+    const fLabel = document.getElementById('dt-f-status-label'); if (fLabel && STATUS_FILTER_LABEL[statusFilterFriend]) fLabel.textContent = `${STATUS_FILTER_LABEL[statusFilterFriend].icon} ${STATUS_FILTER_LABEL[statusFilterFriend].label}`;
+    box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipFriend));
+    const fArrow = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow'); if (fArrow) fArrow.style.display = (activeChipFriend === 'status') ? '' : 'none';
+    box.querySelectorAll('#dt-g-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipGroup));
+    box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipNotFriends));
+    box.querySelectorAll('#dt-s-chips .dt-chip').forEach(c => c.classList.toggle('active', c.dataset.chip === activeChipServer));
+    const nLabel = document.getElementById('dt-n-msg-label'); if (nLabel) nLabel.textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages';
+    const nArrow = document.getElementById('dt-n-msg-arrow'); if (nArrow) nArrow.style.display = (activeChipNotFriends === 'withmsg') ? '' : 'none';
+    const nStatusLabel = document.getElementById('dt-n-status-label'); if (nStatusLabel && STATUS_FILTER_LABEL[statusFilterNotFriends]) nStatusLabel.textContent = `${STATUS_FILTER_LABEL[statusFilterNotFriends].icon} ${STATUS_FILTER_LABEL[statusFilterNotFriends].label}`;
+    const nStatusArrow = document.getElementById('dt-n-status-arrow'); if (nStatusArrow) nStatusArrow.style.display = (activeChipNotFriends === 'status') ? '' : 'none';
   };
+  initChipState();
+
+  const saveCurrentPrefs = () => savePrefs({ sortFriend: $('dt-f-sort').value, dirFriend: sortDirFriend, avFriend: $('dt-f-av').value, fromFriend: $('dt-f-from').value, toFriend: $('dt-f-to').value, chipFriend: activeChipFriend, statusFilterFriend, sortGroup: $('dt-g-sort').value, dirGroup: sortDirGroup, icGroup: $('dt-g-ic').value, fromGroup: $('dt-g-from').value, toGroup: $('dt-g-to').value, chipGroup: activeChipGroup, sortNotFriends: $('dt-n-sort').value, dirNotFriends: sortDirNotFriends, chipNotFriends: activeChipNotFriends, statusFilterNotFriends, notFriendsMsgMode, sortServer: $('dt-s-sort').value, dirServer: sortDirServer, chipServer: activeChipServer, activeTab });
+
+  const head = box.querySelector('.dt-head'); let drag = null;
+  head.addEventListener('mousedown', e => { if (e.target.closest('.dt-x, .dt-min, .dt-tab')) return; const r = box.getBoundingClientRect(); drag = { dx: e.clientX - r.left, dy: e.clientY - r.top }; head.style.cursor = 'grabbing'; e.preventDefault(); });
+  const onMove = e => { if (!drag) return; box.style.left = Math.min(Math.max(0, e.clientX - drag.dx), innerWidth - 60) + 'px'; box.style.top = Math.min(Math.max(0, e.clientY - drag.dy), innerHeight - 40) + 'px'; };
   const onUp = () => { drag = null; head.style.cursor = 'grab'; };
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
   const minBtn = box.querySelector('.dt-min');
-  const toggleMin = () => {
-    const m = box.classList.toggle('min');
-    minBtn.title = m ? 'Expand' : 'Collapse';
-    requestAnimationFrame(() => {
-      const r = box.getBoundingClientRect();
-      if (r.right > innerWidth - 8) {
-        box.style.left = Math.max(8, innerWidth - r.width - 8) + 'px';
-      }
-      if (r.left < 8) {
-        box.style.left = '8px';
-      }
-    });
-  };
-  minBtn.onclick = toggleMin;
-  head.addEventListener('dblclick', e => { if (!e.target.closest('.dt-x, .dt-min, .dt-tab')) toggleMin(); });
-  box.querySelector('.dt-x').onclick = () => {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    box.remove(); style.remove();
-    document.getElementById('__dt_progress')?.remove();
-    document.getElementById('__dt_confirm')?.remove();
-  };
+  const toggleMin = () => { const m = box.classList.toggle('min'); minBtn.title = m ? 'Expand' : 'Collapse'; requestAnimationFrame(() => { const r = box.getBoundingClientRect(); if (r.right > innerWidth - 8) box.style.left = Math.max(8, innerWidth - r.width - 8) + 'px'; if (r.left < 8) box.style.left = '8px'; }); };
+  minBtn.onclick = toggleMin; head.addEventListener('dblclick', e => { if (!e.target.closest('.dt-x, .dt-min, .dt-tab')) toggleMin(); });
+  box.querySelector('.dt-x').onclick = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); box.remove(); style.remove(); document.getElementById('__dt_progress')?.remove(); document.getElementById('__dt_confirm')?.remove(); };
 
-  $('dt-f-adv-toggle').onclick = () => $('dt-f-adv').classList.toggle('open');
-  $('dt-g-adv-toggle').onclick = () => $('dt-g-adv').classList.toggle('open');
-
-  box.querySelector('.dt-refresh').onclick = () => {
-    const btn = box.querySelector('.dt-refresh');
-    btn.classList.add('spinning');
-    btn.disabled = true;
-    statusEl.textContent = '🔄 Reloading Discord Tools…';
-    showLoadingModal('Reloading Discord Tools…');
-    setLoadingStep('Cleaning up…', 20);
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    document.getElementById('__dt_progress')?.remove();
-    document.getElementById('__dt_confirm')?.remove();
-    setTimeout(() => {
-      box.remove();
-      style.remove();
-      if (typeof window.__dt_run === 'function') {
-        window.__dt_run();
-      } else {
-        console.warn('⚠️ Reload function not available — re-paste the script manually');
-      }
-    }, 200);
-  };
+  $('dt-f-adv-toggle').onclick = () => $('dt-f-adv').classList.toggle('open'); $('dt-g-adv-toggle').onclick = () => $('dt-g-adv').classList.toggle('open');
+  box.querySelector('.dt-refresh').onclick = () => { const btn = box.querySelector('.dt-refresh'); btn.classList.add('spinning'); btn.disabled = true; statusEl.textContent = '🔄 Reloading…'; showLoadingModal('Reloading…'); setLoadingStep('Cleaning up…', 20); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.getElementById('__dt_progress')?.remove(); document.getElementById('__dt_confirm')?.remove(); setTimeout(() => { box.remove(); style.remove(); if (typeof window.__dt_run === 'function') window.__dt_run(); else console.warn('⚠️ Reload function not available'); }, 200); };
 
   const applyTab = () => {
     box.querySelectorAll('.dt-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === activeTab));
     box.querySelectorAll('.dt-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === activeTab));
     footEl.style.display = activeTab === 'history' ? 'none' : '';
     silentWrap.style.display = activeTab === 'groups' ? 'flex' : 'none';
-
-    if (activeTab === 'friends') {
-      delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`;
-      delBtn.disabled = busy || selectedFriends.size === 0;
-      statusEl.textContent = `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`;
-    } else if (activeTab === 'groups') {
-      delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`;
-      delBtn.disabled = busy || selectedGroups.size === 0;
-      const solo = groups.filter(g => g.solo).length;
-      statusEl.textContent = `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`;
-    } else if (activeTab === 'notfriends') {
-      delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`;
-      delBtn.disabled = busy || selectedNotFriends.size === 0;
-      statusEl.textContent = `${visibleNotFriends.length} shown / ${notFriends.length} non-friend DM(s) · ${selectedNotFriends.size} selected`;
-    }
+    $('dt-s-bulk-settings').style.display = activeTab === 'servers' ? '' : 'none';
+    $('dt-s-mute-all').style.display = activeTab === 'servers' ? '' : 'none';
+    $('dt-s-unmute-all').style.display = activeTab === 'servers' ? '' : 'none';
+    if (activeTab === 'friends') { delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`; delBtn.disabled = busy || selectedFriends.size === 0; statusEl.textContent = `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`; }
+    else if (activeTab === 'groups') { delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`; delBtn.disabled = busy || selectedGroups.size === 0; const solo = groups.filter(g => g.solo).length; statusEl.textContent = `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`; }
+    else if (activeTab === 'notfriends') { delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`; delBtn.disabled = busy || selectedNotFriends.size === 0; statusEl.textContent = `${visibleNotFriends.length} shown / ${notFriends.length} non-friend DM(s) · ${selectedNotFriends.size} selected`; }
+    else if (activeTab === 'servers') { delBtn.textContent = `🚪 Leave selected (${selectedServers.size})`; delBtn.disabled = busy || selectedServers.size === 0; const owned = servers.filter(s => s.owner).length; statusEl.textContent = `${visibleServers.length} shown / ${servers.length} server(s)${owned ? ` (${owned} owned)` : ''} · ${selectedServers.size} selected`; }
   };
-  box.querySelectorAll('.dt-tab').forEach(t => {
-    t.onclick = () => {
-      activeTab = t.dataset.tab;
-      applyTab();
-      if (activeTab === 'friends') renderFriends();
-      else if (activeTab === 'groups') renderGroups();
-      else if (activeTab === 'notfriends') { ensureNotFriendsScanned(); }
-      else renderHistory();
-      saveCurrentPrefs();
-    };
-  });
+  box.querySelectorAll('.dt-tab').forEach(t => { t.onclick = () => { activeTab = t.dataset.tab; applyTab(); if (activeTab === 'friends') renderFriends(); else if (activeTab === 'groups') renderGroups(); else if (activeTab === 'notfriends') ensureNotFriendsScanned(); else if (activeTab === 'servers') renderServers(); else renderHistory(); saveCurrentPrefs(); }; });
 
   // ════════════════════════════════════════════════════════
   //  FRIENDS TAB
   // ════════════════════════════════════════════════════════
   const selectedFriends = new Set();
   const getVisibleFriends = () => {
-    const q = $('dt-f-q').value.trim().toLowerCase();
-    const av = $('dt-f-av').value;
-    const from = $('dt-f-from').value ? new Date($('dt-f-from').value + 'T00:00:00') : null;
-    const to   = $('dt-f-to').value   ? new Date($('dt-f-to').value + 'T23:59:59') : null;
+    const q = $('dt-f-q').value.trim().toLowerCase(), av = $('dt-f-av').value;
+    const from = $('dt-f-from').value ? new Date($('dt-f-from').value + 'T00:00:00') : null, to = $('dt-f-to').value ? new Date($('dt-f-to').value + 'T23:59:59') : null;
     let l = friends.filter(f => {
       const u = f.user;
       if (q && !(`${u.username} ${u.global_name ?? ''} ${f.id}`.toLowerCase().includes(q))) return false;
       if (from && (!f.since || f.since < from)) return false;
       if (to && (!f.since || f.since > to)) return false;
-      if (av === 'def' && u.avatar) return false;
-      if (av === 'custom' && !u.avatar) return false;
-      if (activeChipFriend === 'newacct'  && !isNewAccount(f))     return false;
-      if (activeChipFriend === 'noavatar' && !isNoAvatar(f))       return false;
-      if (activeChipFriend === 'fresh'    && !isFreshFriend(f))    return false;
-      if (activeChipFriend === 'long'     && !isLongTimeFriend(f)) return false;
-      if (activeChipFriend === 'status') {
-        const st = getStatus(f.id);
-        if (st !== statusFilterFriend) return false;
-      }
+      if (av === 'def' && u.avatar) return false; if (av === 'custom' && !u.avatar) return false;
+      if (activeChipFriend === 'newacct' && !isNewAccount(f)) return false;
+      if (activeChipFriend === 'noavatar' && !isNoAvatar(f)) return false;
+      if (activeChipFriend === 'fresh' && !isFreshFriend(f)) return false;
+      if (activeChipFriend === 'long' && !isLongTimeFriend(f)) return false;
+      if (activeChipFriend === 'status' && getStatus(f.id) !== statusFilterFriend) return false;
       return true;
     });
-    const key = $('dt-f-sort').value;
-    const m = sortDirFriend === 'asc' ? 1 : -1;
-    const val = {
-      added: f => f.since?.getTime() ?? (m === 1 ? Infinity : -Infinity),
-      created: f => f.created.getTime(),
-      lastdm: f => dmLastByUserId.get(f.user.id)?.getTime() ?? (m === 1 ? Infinity : -Infinity),
-    };
-    l.sort((a, b) => key === 'name'
-      ? m * displayName(a.user).localeCompare(displayName(b.user), undefined, { sensitivity: 'base' })
-      : m * (val[key](a) - val[key](b)));
+    const key = $('dt-f-sort').value, m = sortDirFriend === 'asc' ? 1 : -1, emptyTs = m === 1 ? Infinity : -Infinity;
+    const val = { added: f => f.since?.getTime() ?? emptyTs, created: f => f.created.getTime(), lastdm: f => dmLastByUserId.get(f.user.id)?.getTime() ?? emptyTs };
+    l.sort((a, b) => key === 'name' ? m * displayName(a.user).localeCompare(displayName(b.user), undefined, { sensitivity: 'base' }) : m * (val[key](a) - val[key](b)));
     return l;
   };
-
   const friendRowHtml = f => {
-    const u = f.user;
-    const badges = badgesForFriend(f).map(b =>
-      `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`
-    ).join('');
+    const u = f.user; 
+    const badges = badgesForFriend(f).map(b => `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`).join('');
+    
+    // J'ai ajouté le bloc <div class="dt-info"> manquant
     return `<div class="dt-row ${selectedFriends.has(f.id) ? 'sel' : ''}" data-id="${f.id}">
-      <input type="checkbox" class="dt-cb" ${selectedFriends.has(f.id) ? 'checked' : ''}>
-      ${avatarWithStatus(u, 40)}
+      <input type="checkbox" class="dt-cb" ${selectedFriends.has(f.id) ? 'checked' : ''}>${avatarWithStatus(u, 40)}
+      
       <div class="dt-info">
         <div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div>
-        <div class="dt-sub">Friends since ${fmtDate(f.since)} (${fmtRelative(f.since)}) · Account created ${fmtDate(f.created)}${dmLastByUserId.has(u.id) ? ` · 💬 Last DM ${fmtRelative(dmLastByUserId.get(u.id))}` : ''}</div>
+        <div class="dt-sub">Friend since ${f.since ? fmtDate(f.since) : 'unknown'} · Created ${fmtDate(f.created)}</div>
       </div>
+      
       <div class="dt-badges">${badges}</div>
       <div class="dt-actions">
         <button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
-        <button class="dt-cl" title="Delete only your messages in this DM (click twice)">🧹 Clean</button>
-        <button class="dt-rm" title="Remove this friend (click twice)">🗑 Remove</button>
+        <button class="dt-cl" title="Clean your messages (click twice)">🧹 Clean</button>
+        <button class="dt-rm" title="Remove friend (click twice)">🗑 Remove</button>
       </div>
     </div>`;
   };
-
-  const updateFriendFooter = (msg) => {
-    const sa = $('dt-f-selall');
-    if (sa) {
-      const n = visibleFriends.filter(f => selectedFriends.has(f.id)).length;
-      sa.checked = visibleFriends.length > 0 && n === visibleFriends.length;
-      sa.indeterminate = n > 0 && n < visibleFriends.length;
-    }
-    $('dt-fcount').textContent = friends.length;
-    if (activeTab === 'friends') {
-      delBtn.disabled = busy || selectedFriends.size === 0;
-      delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`;
-      statusEl.textContent = msg ?? `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`;
-    }
-  };
-
+  const updateFriendFooter = (msg) => { const sa = $('dt-f-selall'); if (sa) { const n = visibleFriends.filter(f => selectedFriends.has(f.id)).length; sa.checked = visibleFriends.length > 0 && n === visibleFriends.length; sa.indeterminate = n > 0 && n < visibleFriends.length; } $('dt-fcount').textContent = friends.length; if (activeTab === 'friends') { delBtn.disabled = busy || selectedFriends.size === 0; delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`; statusEl.textContent = msg ?? `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`; } };
   let _lastFriendsHash = '';
-  const renderFriends = (force = false) => {
-    visibleFriends = getVisibleFriends();
-    const hash = visibleFriends.map(f => f.id).join(',');
-    if (!force && hash === _lastFriendsHash) {
-      updateFriendFooter();
-      refreshStatusDots();
-      return;
-    }
-    _lastFriendsHash = hash;
-    fListEl.innerHTML = visibleFriends.length ? visibleFriends.map(friendRowHtml).join('')
-      : `<div class="dt-empty">No friends match the filters.</div>`;
-    updateFriendFooter();
-    refreshStatusDots();
-  };
+  const renderFriends = (force = false) => { visibleFriends = getVisibleFriends(); const hash = visibleFriends.map(f => f.id + ':' + (selectedFriends.has(f.id) ? '1' : '0')).join(','); if (!force && hash === _lastFriendsHash) { updateFriendFooter(); refreshStatusDots(); return; } _lastFriendsHash = hash; fListEl.innerHTML = visibleFriends.length ? visibleFriends.map(friendRowHtml).join('') : `<div class="dt-empty">No friends match the filters.</div>`; updateFriendFooter(); refreshStatusDots(); };
 
-  async function cleanDMWithFriend(friend, progress) {
-    const channelId = await resolveDMChannel(friend.id);
-    if (!channelId) return { deleted: 0, total: 0, errors: 0, skipped: true, cancelled: false };
-    const label = displayName(friend.user);
-    return await cleanChannelMessages({ id: channelId }, progress, label);
-  }
-
+  async function cleanDMWithFriend(friend, progress) { const channelId = await resolveDMChannel(friend.id); if (!channelId) return { deleted: 0, total: 0, errors: 0, skipped: true, cancelled: false }; return await cleanChannelMessages({ id: channelId }, progress, displayName(friend.user)); }
   async function askFriendChoice({ count, totalMsgCount, individualName }) {
     const hasMessages = totalMsgCount === undefined ? count > 0 : totalMsgCount > 0;
-    const title = individualName
-      ? `Remove ${esc(individualName)}?`
-      : `Remove ${count} friend${count > 1 ? 's' : ''}?`;
-    const baseMsg = individualName
-      ? `You're about to permanently remove <b style="color:#fff">${esc(individualName)}</b> from your friends list.`
-      : `You're about to permanently remove <b style="color:#fff">${count}</b> friends from your list.`;
-
-    if (!hasMessages) {
-      return await choiceDialog({
-        title,
-        message: `${baseMsg}<br><br>
-                  <span style="color:#949ba4;font-size:12px">💡 No messages from you in ${individualName ? 'this DM' : 'these DMs'} — nothing to clean.</span><br><br>
-                  <span style="color:#faa61a">⚠️ This cannot be undone.</span>`,
-        choices: [
-          { label: 'Cancel',    value: 'cancel' },
-          { label: '🗑 Remove', value: 'plain', danger: true },
-        ],
-      });
-    }
-    const msgLine = individualName
-      ? `Do you also want to <b style="color:#fff">delete all your DM messages</b> with them (<b style="color:#fff">${totalMsgCount ?? count}+</b>)?`
-      : `Do you also want to <b style="color:#fff">delete all your DM messages</b> with them?<br>
-         <span style="color:#949ba4;font-size:12px">${totalMsgCount} message(s) found across the selection.</span>`;
-    return await choiceDialog({
-      title,
-      message: `${baseMsg}<br><br>${msgLine}<br><br>
-                <span style="color:#faa61a">⚠️ This cannot be undone.</span>`,
-      choices: [
-        { label: 'Cancel',                value: 'cancel' },
-        { label: '🗑 Remove only',        value: 'plain'  },
-        { label: '🧹 Clean DMs + remove', value: 'clean', danger: true },
-      ],
-    });
+    const title = individualName ? `Remove ${esc(individualName)}?` : `Remove ${count} friend${count > 1 ? 's' : ''}?`;
+    const baseMsg = individualName ? `You're about to permanently remove <b style="color:#fff">${esc(individualName)}</b>.` : `You're about to permanently remove <b style="color:#fff">${count}</b> friends.`;
+    if (!hasMessages) return await choiceDialog({ title, message: `${baseMsg}<br><br><span style="color:#949ba4;font-size:12px">💡 No messages from you.</span><br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🗑 Remove', value: 'plain', danger: true }] });
+    const msgLine = individualName ? `Also <b style="color:#fff">delete your DM messages</b> (${totalMsgCount ?? count}+)?` : `Also <b style="color:#fff">delete your DM messages</b>?<br><span style="color:#949ba4;font-size:12px">${totalMsgCount} message(s) found.</span>`;
+    return await choiceDialog({ title, message: `${baseMsg}<br><br>${msgLine}<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🗑 Remove only', value: 'plain' }, { label: '🧹 Clean DMs + remove', value: 'clean', danger: true }] });
   }
-
   async function removeOneFriend(id, btn, row) {
-    if (busy) return;
-    const f = friends.find(x => x.id === id);
-    if (!f) return;
-    const name = displayName(f.user);
-
-    busy = true;
-    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
-    statusEl.textContent = `🔍 Checking your messages with ${name}…`;
-
-    let channelId = null;
-    try { channelId = await resolveDMChannel(id); } catch {}
-    let msgCount = 0;
-    if (channelId) msgCount = await quickCountMyMessages(channelId);
-
+    if (busy) return; const f = friends.find(x => x.id === id); if (!f) return; const name = displayName(f.user); busy = true;
+    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; } statusEl.textContent = `🔍 Checking messages with ${name}…`;
+    let channelId = null; try { channelId = await resolveDMChannel(id); } catch {} let msgCount = 0; if (channelId) msgCount = await quickCountMyMessages(channelId);
+    if (!box.isConnected) { busy = false; return; } const action = await askFriendChoice({ count: msgCount, individualName: name });
+    if (btn) { btn.classList.remove('loading'); btn.textContent = '🗑 Remove'; } busy = false;
+    if (!box.isConnected || action === 'cancel') { updateFriendFooter(); return; } busy = true; if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
+    let dmResult = null; if (action === 'clean') { statusEl.textContent = `🧹 Cleaning DM with ${name}…`; const progress = createProgressOverlay('clean'); try { dmResult = await cleanDMWithFriend(f, progress); } catch {} progress.finish(dmResult?.deleted ?? 0, dmResult?.total ?? 0, dmResult?.errors ?? 0, dmResult?.cancelled ?? false); }
+    let abortRemove = false; if (dmResult?.cancelled) { abortRemove = true; } else if (dmResult && dmResult.errors > 0) { const choice = await choiceDialog({ title: `Errors deleting`, message: `<b>${dmResult.errors}</b> errors. Still remove?`, choices: [{ label: '❌ Keep friend', value: 'keep' }, { label: '🗑 Remove anyway', value: 'remove', danger: true }] }); if (choice !== 'remove') abortRemove = true; }
+    if (abortRemove) { busy = false; if (btn) { btn.classList.remove('loading'); btn.textContent = '🗑 Remove'; } if (box.isConnected) updateFriendFooter(); return; }
+    statusEl.textContent = `🗑 Removing ${name}…`; let removed = false; try { removed = await removeFriendAPI(id, ({ waitMs, attempt, max }) => statusEl.textContent = `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s`); } catch {}
     if (!box.isConnected) { busy = false; return; }
-    const action = await askFriendChoice({ count: msgCount, individualName: name });
-    if (btn) { btn.classList.remove('loading'); btn.textContent = '🗑 Remove'; }
-    busy = false;
-    if (!box.isConnected || action === 'cancel') { updateFriendFooter(); return; }
-
-    busy = true;
-    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
-
-    let dmResult = null;
-    if (action === 'clean') {
-      statusEl.textContent = `🧹 Cleaning DM with ${name}…`;
-      const progress = createProgressOverlay('clean');
-      try { dmResult = await cleanDMWithFriend(f, progress); } catch (e) { console.warn(e); }
-      progress.finish(dmResult?.deleted ?? 0, dmResult?.total ?? 0, dmResult?.errors ?? 0, dmResult?.cancelled ?? false);
-    }
-
-    let abortRemove = false;
-    if (dmResult?.cancelled) {
-      abortRemove = true;
-      statusEl.textContent = `⛔ Clean cancelled — ${name} NOT removed.`;
-    } else if (dmResult && dmResult.errors > 0) {
-      const choice = await choiceDialog({
-        title: `Some messages couldn't be deleted`,
-        message: `<b style="color:#fff">${dmResult.deleted}/${dmResult.total}</b> messages deleted — <b style="color:#faa61a">${dmResult.errors} error${dmResult.errors > 1 ? 's' : ''}</b>.<br><br>
-                  Do you still want to remove <b style="color:#fff">${esc(name)}</b>?`,
-        choices: [
-          { label: '❌ Keep friend',   value: 'keep' },
-          { label: '🗑 Remove anyway', value: 'remove', danger: true },
-        ],
-      });
-      if (choice !== 'remove') abortRemove = true;
-    }
-
-    if (abortRemove) {
-      busy = false;
-      if (btn) { btn.classList.remove('loading'); btn.textContent = '🗑 Remove'; }
-      if (box.isConnected) updateFriendFooter();
-      return;
-    }
-
-    statusEl.textContent = `🗑 Removing ${name}…`;
-    let removed = false;
-    try {
-      removed = await removeFriendAPI(id, ({ waitMs, attempt, max }) =>
-        statusEl.textContent = `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s`);
-    } catch (e) { console.warn(e.message); }
-
-    if (!box.isConnected) { busy = false; return; }
-
     if (removed) {
-      let dmClosed = false;
-      if (channelId) {
-        statusEl.textContent = `👋 Closing DM with ${name}…`;
-        dmClosed = await closeDMChannel(channelId);
-      }
-      pushHistory({
-        kind: 'friend',
-        id: f.id,
-        username: f.user.username,
-        global_name: f.user.global_name || null,
-        avatarUrl: avatarUrl(f.user),
-        removedAt: Date.now(),
-        cleaned: !!(dmResult?.deleted || dmResult?.total),
-        dmDeleted: dmResult?.deleted || 0,
-        dmClosed,
-        friendSince: f.since ? f.since.getTime() : null,
-      });
-      friends = friends.filter(x => x.id !== id);
-      friendIds.delete(id);
-      selectedFriends.delete(id);
-      dmChannelByUserId.delete(id);
-      busy = false;
-      const dmInfo = dmResult?.deleted ? ` · 🧹 ${dmResult.deleted} msg deleted` : '';
-      console.log(`✅ Removed: ${name}${dmInfo}${dmClosed ? ' · ✖️ DM closed' : ''}`);
-      if (row) {
-        row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s';
-        row.style.opacity = '0'; row.style.transform = 'translateX(24px)';
-        row.style.maxHeight = row.offsetHeight + 'px';
-        requestAnimationFrame(() => {
-          row.style.maxHeight = '0'; row.style.paddingTop = '0';
-          row.style.paddingBottom = '0'; row.style.borderBottom = 'none';
-        });
-        setTimeout(() => { const top = fListEl.scrollTop; renderFriends(); fListEl.scrollTop = top; }, 260);
-      } else {
-        updateFriendFooter(`✅ ${name} removed${dmInfo}.`);
-      }
-    } else {
-      busy = false;
-      if (btn) { btn.classList.add('err'); btn.textContent = '✕ Failed'; }
-      updateFriendFooter(`⚠️ Failed to remove ${name}`);
-    }
+      let dmClosed = false; if (channelId) { statusEl.textContent = `👋 Closing DM with ${name}…`; dmClosed = await closeDMChannel(channelId); }
+      pushHistory({ kind: 'friend', id: f.id, username: f.user.username, global_name: f.user.global_name || null, avatarUrl: avatarUrl(f.user), removedAt: Date.now(), cleaned: !!(dmResult?.deleted || dmResult?.total), dmDeleted: dmResult?.deleted || 0, dmClosed, friendSince: f.since ? f.since.getTime() : null });
+      friends = friends.filter(x => x.id !== id); friendIds.delete(id); selectedFriends.delete(id); dmChannelByUserId.delete(id); busy = false;
+      if (row) { row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s'; row.style.opacity = '0'; row.style.transform = 'translateX(24px)'; row.style.maxHeight = row.offsetHeight + 'px'; requestAnimationFrame(() => { row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0'; row.style.borderBottom = 'none'; }); setTimeout(() => { const top = fListEl.scrollTop; renderFriends(); fListEl.scrollTop = top; }, 260); } else updateFriendFooter(`✅ ${name} removed.`);
+    } else { busy = false; if (btn) { btn.classList.add('err'); btn.textContent = '✕ Failed'; } updateFriendFooter(`⚠️ Failed to remove ${name}`); }
   }
-
   async function cleanOneFriendDM(id, btn) {
-    if (busy) return;
-    const f = friends.find(x => x.id === id);
-    if (!f) return;
-    const name = displayName(f.user);
-    busy = true;
-    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
-    statusEl.textContent = `🧹 Cleaning DM with ${name}…`;
-
-    const wasOpen = dmChannelByUserId.has(id);
-    const progress = createProgressOverlay('clean');
-    let res = null;
-    try { res = await cleanDMWithFriend(f, progress); } catch (e) { console.warn(e); }
-    if (res?.skipped) progress.remove();
-    else progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
-
-    if (!wasOpen) {
-      const chId = dmChannelByUserId.get(id);
-      if (chId) { await closeDMChannel(chId); dmChannelByUserId.delete(id); }
-    }
-    busy = false;
-    if (!box.isConnected) return;
-    if (btn?.isConnected) { btn.classList.remove('loading'); btn.textContent = '🧹 Clean'; }
-
-    let msg;
-    if (res?.cancelled)        msg = `⛔ Clean cancelled for ${name} — ${res.deleted}/${res.total} deleted.`;
-    else if (res?.errors > 0)  msg = `⚠️ ${name}: ${res.deleted}/${res.total} deleted — ${res.errors} error(s).`;
-    else if (res?.deleted > 0) msg = `✅ ${name}: 🧹 ${res.deleted} message${res.deleted > 1 ? 's' : ''} deleted.`;
-    else                       msg = `ℹ️ ${name}: 0 message sent.`;
-    updateFriendFooter(msg);
+    if (busy) return; const f = friends.find(x => x.id === id); if (!f) return; const name = displayName(f.user); busy = true;
+    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; } statusEl.textContent = `🧹 Cleaning DM with ${name}…`;
+    const wasOpen = dmChannelByUserId.has(id); const progress = createProgressOverlay('clean'); let res = null; try { res = await cleanDMWithFriend(f, progress); } catch {}
+    if (res?.skipped) progress.remove(); else progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
+    if (!wasOpen) { const chId = dmChannelByUserId.get(id); if (chId) { await closeDMChannel(chId); dmChannelByUserId.delete(id); } }
+    busy = false; if (!box.isConnected) return; if (btn?.isConnected) { btn.classList.remove('loading'); btn.textContent = '🧹 Clean'; }
+    let msg; if (res?.cancelled) msg = `⛔ Cancelled.`; else if (res?.errors > 0) msg = `⚠️ ${res.errors} errors.`; else if (res?.deleted > 0) msg = `✅ ${res.deleted} deleted.`; else msg = `ℹ️ 0 message.`; updateFriendFooter(msg);
   }
 
   fListEl.addEventListener('click', async e => {
-    const row = e.target.closest('.dt-row');
-    if (!row) return;
-    const id = row.dataset.id;
-
+    const row = e.target.closest('.dt-row'); if (!row) return; const id = row.dataset.id;
     if (e.target.closest('.dt-av, .dt-name')) { openProfile(id); return; }
-
-    const dmBtn = e.target.closest('.dt-dm');
-    if (dmBtn) {
-      e.stopPropagation();
-      if (dmBtn.classList.contains('loading')) return;
-      dmBtn.classList.add('loading');
-      try { await openDM(id); } catch {}
-      setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400);
-      return;
-    }
-
-    const clBtn = e.target.closest('.dt-cl');
-    if (clBtn) {
-      e.stopPropagation();
-      if (clBtn.classList.contains('loading')) return;
-      if (!clBtn.dataset.armed) {
-        clBtn.dataset.armed = '1'; clBtn.classList.add('armed'); clBtn.textContent = '⚠ sure?';
-        clBtn._timer = setTimeout(() => {
-          if (!clBtn.isConnected) return;
-          delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean';
-        }, 3000);
-        return;
-      }
-      clearTimeout(clBtn._timer); delete clBtn.dataset.armed;
-      clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean';
-      await cleanOneFriendDM(id, clBtn);
-      return;
-    }
-
-    const rmBtn = e.target.closest('.dt-rm');
-    if (rmBtn) {
-      e.stopPropagation();
-      if (rmBtn.classList.contains('loading') || rmBtn.classList.contains('err')) return;
-      if (!rmBtn.dataset.armed) {
-        rmBtn.dataset.armed = '1'; rmBtn.classList.add('armed'); rmBtn.textContent = '⚠ sure?';
-        rmBtn._timer = setTimeout(() => {
-          if (!rmBtn.isConnected) return;
-          delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🗑 Remove';
-        }, 3000);
-        return;
-      }
-      clearTimeout(rmBtn._timer); delete rmBtn.dataset.armed;
-      rmBtn.classList.remove('armed'); rmBtn.textContent = '🗑 Remove';
-      await removeOneFriend(id, rmBtn, row);
-      return;
-    }
-
-    const cb = row.querySelector('.dt-cb');
-    if (e.target !== cb) cb.checked = !cb.checked;
-    cb.checked ? selectedFriends.add(id) : selectedFriends.delete(id);
-    row.classList.toggle('sel', cb.checked);
-    updateFriendFooter();
+    const dmBtn = e.target.closest('.dt-dm'); if (dmBtn) { e.stopPropagation(); if (dmBtn.classList.contains('loading')) return; dmBtn.classList.add('loading'); try { await openDM(id); } catch {} setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400); return; }
+    const clBtn = e.target.closest('.dt-cl'); if (clBtn) { e.stopPropagation(); if (clBtn.classList.contains('loading')) return; if (!clBtn.dataset.armed) { clBtn.dataset.armed = '1'; clBtn.classList.add('armed'); clBtn.textContent = '⚠ sure?'; clBtn._timer = setTimeout(() => { if (!clBtn.isConnected) return; delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean'; }, 3000); return; } clearTimeout(clBtn._timer); delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean'; await cleanOneFriendDM(id, clBtn); return; }
+    const rmBtn = e.target.closest('.dt-rm'); if (rmBtn) { e.stopPropagation(); if (rmBtn.classList.contains('loading') || rmBtn.classList.contains('err')) return; if (!rmBtn.dataset.armed) { rmBtn.dataset.armed = '1'; rmBtn.classList.add('armed'); rmBtn.textContent = '⚠ sure?'; rmBtn._timer = setTimeout(() => { if (!rmBtn.isConnected) return; delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🗑 Remove'; }, 3000); return; } clearTimeout(rmBtn._timer); delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🗑 Remove'; await removeOneFriend(id, rmBtn, row); return; }
+    const cb = row.querySelector('.dt-cb'); if (e.target !== cb) cb.checked = !cb.checked; cb.checked ? selectedFriends.add(id) : selectedFriends.delete(id); row.classList.toggle('sel', cb.checked); updateFriendFooter();
   });
 
-  let _fSearchTimer = null;
-  $('dt-f-q').addEventListener('input', () => {
-    clearTimeout(_fSearchTimer);
-    _fSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderFriends(); }, 180);
-  });
-  ['dt-f-sort', 'dt-f-from', 'dt-f-to', 'dt-f-av'].forEach(id => {
-    $(id).addEventListener('change', () => { saveCurrentPrefs(); renderFriends(); });
-  });
-  $('dt-f-dir').onclick = e => {
-    sortDirFriend = sortDirFriend === 'desc' ? 'asc' : 'desc';
-    e.currentTarget.textContent = sortDirFriend === 'desc' ? '↓' : '↑';
-    saveCurrentPrefs(); renderFriends();
-  };
-  $('dt-f-selall').onchange = e => {
-    if (e.target.checked) visibleFriends.forEach(f => selectedFriends.add(f.id));
-    else visibleFriends.forEach(f => selectedFriends.delete(f.id));
-    renderFriends();
-  };
-  box.querySelectorAll('#dt-f-chips .dt-chip').forEach(chip => {
-    chip.onclick = () => {
-      const chipName = chip.dataset.chip;
-      const alreadyActive = chip.classList.contains('active') && activeChipFriend === chipName;
-
-      // 🔄 Chip "status" : cycle entre online → idle → dnd → offline
-      if (chipName === 'status' && alreadyActive) {
-        const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterFriend);
-        const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length];
-        statusFilterFriend = next;
-        const { icon, label } = STATUS_FILTER_LABEL[next];
-        const labelEl = document.getElementById('dt-f-status-label');
-        if (labelEl) labelEl.textContent = `${icon} ${label}`;
-        saveCurrentPrefs();
-        renderFriends();
-        return;
-      }
-
-      // Sinon : comportement normal (switch de chip)
-      box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      activeChipFriend = chipName;
-
-      // 👁️ Affiche/cache la flèche selon si le chip statut est actif
-      {
-        const arrowEl = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow');
-        if (arrowEl) arrowEl.style.display = (chipName === 'status') ? '' : 'none';
-      }
-
-      saveCurrentPrefs(); renderFriends();
-    };
-  });
+  let _fSearchTimer = null; $('dt-f-q').addEventListener('input', () => { clearTimeout(_fSearchTimer); _fSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderFriends(); }, 180); });
+  ['dt-f-from', 'dt-f-to', 'dt-f-av'].forEach(id => $(id).addEventListener('change', () => { saveCurrentPrefs(); renderFriends(); }));
+  $('dt-f-sort').addEventListener('change', () => { updateFriendDirLabel(); saveCurrentPrefs(); renderFriends(); }); $('dt-f-dir').onclick = () => { sortDirFriend = sortDirFriend === 'desc' ? 'asc' : 'desc'; updateFriendDirLabel(); saveCurrentPrefs(); renderFriends(); };
+  $('dt-f-selall').onchange = e => { if (e.target.checked) visibleFriends.forEach(f => selectedFriends.add(f.id)); else visibleFriends.forEach(f => selectedFriends.delete(f.id)); renderFriends(); };
+  box.querySelectorAll('#dt-f-chips .dt-chip').forEach(chip => { chip.onclick = () => { const chipName = chip.dataset.chip; const alreadyActive = chip.classList.contains('active') && activeChipFriend === chipName; if (chipName === 'status' && alreadyActive) { const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterFriend); const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length]; statusFilterFriend = next; document.getElementById('dt-f-status-label').textContent = `${STATUS_FILTER_LABEL[next].icon} ${STATUS_FILTER_LABEL[next].label}`; saveCurrentPrefs(); renderFriends(); return; } box.querySelectorAll('#dt-f-chips .dt-chip').forEach(c => c.classList.remove('active')); chip.classList.add('active'); activeChipFriend = chipName; const arrowEl = document.querySelector('#dt-f-status-toggle .dt-n-msg-arrow'); if (arrowEl) arrowEl.style.display = (chipName === 'status') ? '' : 'none'; saveCurrentPrefs(); renderFriends(); }; });
 
   // ════════════════════════════════════════════════════════
   //  GROUPS TAB
   // ════════════════════════════════════════════════════════
   const selectedGroups = new Set();
   const getVisibleGroups = () => {
-    const q = $('dt-g-q').value.trim().toLowerCase();
-    const ic = $('dt-g-ic').value;
-    const from = $('dt-g-from').value ? new Date($('dt-g-from').value + 'T00:00:00') : null;
-    const to   = $('dt-g-to').value   ? new Date($('dt-g-to').value + 'T23:59:59') : null;
-    const l = groups.filter(g => {
-      if (q && !(`${g.name} ${g.members} ${g.id}`.toLowerCase().includes(q))) return false;
-      if (from && g.created < from) return false;
-      if (to && g.created > to) return false;
-      if (ic === 'def' && g.icon) return false;
-      if (ic === 'custom' && !g.icon) return false;
-      if (activeChipGroup === 'solo'     && !g.solo)       return false;
-      if (activeChipGroup === 'named'    && !g.named)      return false;
-      if (activeChipGroup === 'inactive' && !isInactive(g)) return false;
-      if (activeChipGroup === 'new'      && !isNewGroup(g)) return false;
-      if (activeChipGroup === 'old'      && !isOldGroup(g)) return false;
-      return true;
-    });
-    const key = $('dt-g-sort').value;
-    const m = sortDirGroup === 'asc' ? 1 : -1;
-    const val = {
-      created:  g => g.created.getTime(),
-      activity: g => g.last?.getTime() ?? 0,
-      members:  g => g.size,
-    };
-    l.sort((a, b) => key === 'name'
-      ? m * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-      : m * (val[key](a) - val[key](b)));
-    return l;
+    const q = $('dt-g-q').value.trim().toLowerCase(), ic = $('dt-g-ic').value; const from = $('dt-g-from').value ? new Date($('dt-g-from').value + 'T00:00:00') : null, to = $('dt-g-to').value ? new Date($('dt-g-to').value + 'T23:59:59') : null;
+    const l = groups.filter(g => { if (q && !(`${g.name} ${g.members} ${g.id}`.toLowerCase().includes(q))) return false; if (from && g.created < from) return false; if (to && g.created > to) return false; if (ic === 'def' && g.icon) return false; if (ic === 'custom' && !g.icon) return false; if (activeChipGroup === 'solo' && !g.solo) return false; if (activeChipGroup === 'named' && !g.named) return false; if (activeChipGroup === 'inactive' && !isInactive(g)) return false; if (activeChipGroup === 'new' && !isNewGroup(g)) return false; if (activeChipGroup === 'old' && !isOldGroup(g)) return false; return true; });
+    const key = $('dt-g-sort').value, m = sortDirGroup === 'asc' ? 1 : -1, emptyTs = m === 1 ? Infinity : -Infinity; const val = { created: g => g.created.getTime(), activity: g => g.last?.getTime() ?? emptyTs, members: g => g.size };
+    l.sort((a, b) => key === 'name' ? m * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) : m * (val[key](a) - val[key](b))); return l;
   };
-
   const groupRowHtml = g => {
-    const badges = badgesForGroup(g).map(b =>
-      `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`
-    ).join('');
-    const av = g.icon
-      ? `<img class="dt-av" loading="lazy" src="${iconUrl(g)}" title="Open group">`
-      : `<div class="dt-av dt-av-ph ${g.solo ? 'solo' : ''}" title="Open group">👥</div>`;
-    return `<div class="dt-row ${selectedGroups.has(g.id) ? 'sel' : ''}" data-id="${g.id}">
-      <input type="checkbox" class="dt-cb" ${selectedGroups.has(g.id) ? 'checked' : ''}>
-      ${av}
-      <div class="dt-info">
-        <div class="dt-name" title="Open group">${esc(g.name)}</div>
-        <div class="dt-sub">${g.size} member${g.size > 1 ? 's' : ''} · Created ${fmtDate(g.created)} (${fmtRelative(g.created)}) · Last activity ${g.last ? fmtRelative(g.last) : 'unknown'}</div>
-      </div>
-      <div class="dt-badges">${badges}</div>
-      <div class="dt-actions">
-<button class="dt-open" title="Open group"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
-        <button class="dt-rm" title="Leave this group (click twice)">🚪 Leave</button>
-      </div>
-    </div>`;
+    const badges = badgesForGroup(g).map(b => `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`).join('');
+    const av = g.icon ? `<img class="dt-av" loading="lazy" src="${iconUrl(g)}" title="Open group">` : `<div class="dt-av dt-av-ph ${g.solo ? 'solo' : ''}" title="Open group">👥</div>`;
+    return `<div class="dt-row ${selectedGroups.has(g.id) ? 'sel' : ''}" data-id="${g.id}"><input type="checkbox" class="dt-cb" ${selectedGroups.has(g.id) ? 'checked' : ''}>${av}<div class="dt-info"><div class="dt-name" title="Open group">${esc(g.name)}</div><div class="dt-sub">${g.size} member${g.size > 1 ? 's' : ''} · Created ${fmtDate(g.created)} (${fmtRelative(g.created)}) · Last activity ${g.last ? fmtRelative(g.last) : 'unknown'}</div></div><div class="dt-badges">${badges}</div><div class="dt-actions"><button class="dt-open" title="Open group"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button><button class="dt-rm" title="Leave (click twice)">🚪 Leave</button></div></div>`;
   };
-
-  const updateGroupFooter = (msg) => {
-    const sa = $('dt-g-selall');
-    if (sa) {
-      const n = visibleGroups.filter(g => selectedGroups.has(g.id)).length;
-      sa.checked = visibleGroups.length > 0 && n === visibleGroups.length;
-      sa.indeterminate = n > 0 && n < visibleGroups.length;
-    }
-    $('dt-gcount').textContent = groups.length;
-    if (activeTab === 'groups') {
-      delBtn.disabled = busy || selectedGroups.size === 0;
-      delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`;
-      const solo = groups.filter(g => g.solo).length;
-      statusEl.textContent = msg ?? `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`;
-    }
-  };
-
-  const renderGroups = () => {
-    visibleGroups = getVisibleGroups();
-    gListEl.innerHTML = visibleGroups.length ? visibleGroups.map(groupRowHtml).join('')
-      : `<div class="dt-empty">${groups.length === 0 ? "You're not in any group DM 🎉" : 'No groups match the filters.'}</div>`;
-    updateGroupFooter();
-  };
+  const updateGroupFooter = (msg) => { const sa = $('dt-g-selall'); if (sa) { const n = visibleGroups.filter(g => selectedGroups.has(g.id)).length; sa.checked = visibleGroups.length > 0 && n === visibleGroups.length; sa.indeterminate = n > 0 && n < visibleGroups.length; } $('dt-gcount').textContent = groups.length; if (activeTab === 'groups') { delBtn.disabled = busy || selectedGroups.size === 0; delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`; const solo = groups.filter(g => g.solo).length; statusEl.textContent = msg ?? `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`; } };
+  const renderGroups = () => { visibleGroups = getVisibleGroups(); gListEl.innerHTML = visibleGroups.length ? visibleGroups.map(groupRowHtml).join('') : `<div class="dt-empty">${groups.length === 0 ? "No group DM 🎉" : 'No groups match.'}</div>`; updateGroupFooter(); };
 
   async function askGroupChoice({ count, totalMsgCount, individualName }) {
-    const found = individualName ? count : totalMsgCount;
-    const title = individualName ? `Leave ${individualName}?` : `Leave ${count} group${count > 1 ? 's' : ''}?`;
-    const baseMsg = individualName
-      ? `You're about to leave <b style="color:#fff">${esc(individualName)}</b>.`
-      : `You're about to leave <b style="color:#fff">${count}</b> group${count > 1 ? 's' : ''}.`;
-    const scope = individualName ? 'in this group' : 'in these groups';
-    const each  = individualName ? '' : ' of each group';
-    const hint = found > 0
-      ? `At least <b style="color:#fff">${found}</b> message${found > 1 ? 's' : ''} from you found among the latest 100${each}.`
-      : `No message from you among the latest 100${each} — older ones may still exist.`;
-
-    return await choiceDialog({
-      title,
-      message: `${baseMsg}<br><br>
-                Do you also want to <b style="color:#fff">delete all your messages</b> ${scope} before leaving?<br>
-                <span style="color:#949ba4;font-size:12px">${hint}<br>
-                Messages must be deleted <i>before</i> leaving — once you've left, you can no longer delete them.</span><br><br>
-                <span style="color:#faa61a">⚠️ This cannot be undone.</span>`,
-      choices: [
-        { label: 'Cancel',                     value: 'cancel' },
-        { label: '🚪 Leave only',              value: 'plain'  },
-        { label: '🧹 Delete messages + leave', value: 'clean', danger: true },
-      ],
-    });
+    const found = individualName ? count : totalMsgCount; const title = individualName ? `Leave ${individualName}?` : `Leave ${count} group${count > 1 ? 's' : ''}?`; const baseMsg = individualName ? `You're about to leave <b style="color:#fff">${esc(individualName)}</b>.` : `You're about to leave <b style="color:#fff">${count}</b> groups.`;
+    const hint = found > 0 ? `At least <b style="color:#fff">${found}</b> message${found > 1 ? 's' : ''} from you.` : `No message from you among the latest 100.`;
+    return await choiceDialog({ title, message: `${baseMsg}<br><br>Also <b style="color:#fff">delete your messages</b> before leaving?<br><span style="color:#949ba4;font-size:12px">${hint}<br>Must be deleted <i>before</i> leaving.</span><br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🚪 Leave only', value: 'plain' }, { label: '🧹 Delete + leave', value: 'clean', danger: true }] });
   }
-
-  async function cleanGroupMessages(group, progress) {
-    return await cleanChannelMessages(group, progress, group.name);
-  }
-
+  async function cleanGroupMessages(group, progress) { return await cleanChannelMessages(group, progress, group.name); }
   async function leaveOneGroupWithChoice(group, silent) {
-    const count = await quickCountMyMessages(group.id);
-    const action = await askGroupChoice({ count, individualName: group.name });
-    if (action === 'cancel') return { status: 'cancelled', deleted: 0 };
-
+    const count = await quickCountMyMessages(group.id); const action = await askGroupChoice({ count, individualName: group.name }); if (action === 'cancel') return { status: 'cancelled', deleted: 0 };
     let deleted = 0;
-    if (action === 'clean') {
-      const progress = createProgressOverlay('clean', silent);
-      let res = null;
-      try { res = await cleanGroupMessages(group, progress); } catch (e) { console.warn(e); }
-      progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
-      deleted = res?.deleted ?? 0;
-
-      if (res?.cancelled) return { status: 'cancelled', deleted };
-      if (res && res.errors > 0) {
-        const choice = await choiceDialog({
-          title: `Some messages couldn't be deleted`,
-          message: `<b style="color:#fff">${res.deleted}/${res.total}</b> deleted — <b style="color:#faa61a">${res.errors} error${res.errors > 1 ? 's' : ''}</b>.<br><br>
-                    Still leave <b style="color:#fff">${esc(group.name)}</b>?`,
-          choices: [
-            { label: '❌ Stay in group', value: 'keep'  },
-            { label: '🚪 Leave anyway',  value: 'leave', danger: true },
-          ],
-        });
-        if (choice !== 'leave') return { status: 'cancelled', deleted };
-      }
-    }
-    const ok = await leaveGroupAPI(group, silent);
-    return { status: ok ? 'left' : 'failed', deleted };
+    if (action === 'clean') { const progress = createProgressOverlay('clean', silent); let res = null; try { res = await cleanGroupMessages(group, progress); } catch {} progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false); deleted = res?.deleted ?? 0; if (res?.cancelled) return { status: 'cancelled', deleted }; if (res && res.errors > 0) { const choice = await choiceDialog({ title: `Errors`, message: `<b>${res.errors}</b> errors. Still leave?`, choices: [{ label: '❌ Stay', value: 'keep' }, { label: '🚪 Leave anyway', value: 'leave', danger: true }] }); if (choice !== 'leave') return { status: 'cancelled', deleted }; } }
+    const ok = await leaveGroupAPI(group, silent); return { status: ok ? 'left' : 'failed', deleted };
   }
-
-  const logLeftGroup = (g, { deleted = 0, silent }) => pushHistory({
-    kind: 'group',
-    id: g.id, name: g.name, iconUrl: iconUrl(g), size: g.size, solo: g.solo,
-    leftAt: Date.now(), msgDeleted: deleted, silent: !!silent,
-    createdTs: g.created.getTime(),
-  });
-
+  const logLeftGroup = (g, { deleted = 0, silent }) => pushHistory({ kind: 'group', id: g.id, name: g.name, iconUrl: iconUrl(g), size: g.size, solo: g.solo, leftAt: Date.now(), msgDeleted: deleted, silent: !!silent, createdTs: g.created.getTime() });
   async function leaveOneGroupRow(id, btn, row) {
-    if (busy) return;
-    const g = groups.find(x => x.id === id);
-    if (!g) return;
-    busy = true;
-    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
-    statusEl.textContent = `🔍 Checking your messages in ${g.name}…`;
-
-    const silent = silentCb.checked;
-    const res = await leaveOneGroupWithChoice(g, silent);
-    busy = false;
-    if (!box.isConnected) return;
-
-    if (res.status === 'cancelled') {
-      if (btn) { btn.classList.remove('loading'); btn.textContent = '🚪 Leave'; }
-      updateGroupFooter();
-      return;
-    }
-    if (res.status === 'left') {
-      logLeftGroup(g, { deleted: res.deleted, silent });
-      groups = groups.filter(x => x.id !== id);
-      selectedGroups.delete(id);
-      const info = res.deleted ? ` · 🧹 ${res.deleted} msg deleted` : '';
-      if (row) {
-        row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s';
-        row.style.opacity = '0'; row.style.transform = 'translateX(24px)';
-        row.style.maxHeight = row.offsetHeight + 'px';
-        requestAnimationFrame(() => {
-          row.style.maxHeight = '0'; row.style.paddingTop = '0';
-          row.style.paddingBottom = '0'; row.style.borderBottom = 'none';
-        });
-        setTimeout(() => { const top = gListEl.scrollTop; renderGroups(); gListEl.scrollTop = top; updateGroupFooter(`✅ ${g.name} left${info}.`); }, 260);
-      } else {
-        renderGroups(); updateGroupFooter(`✅ ${g.name} left${info}.`);
-      }
-    } else {
-      if (btn) { btn.classList.remove('loading'); btn.classList.add('err'); btn.textContent = '✕ Failed'; }
-      updateGroupFooter(`⚠️ Failed to leave ${g.name}`);
-    }
+    if (busy) return; const g = groups.find(x => x.id === id); if (!g) return; busy = true; if (btn) { btn.classList.add('loading'); btn.textContent = '…'; } statusEl.textContent = `🔍 Checking…`;
+    const silent = silentCb.checked; const res = await leaveOneGroupWithChoice(g, silent); busy = false; if (!box.isConnected) return;
+    if (res.status === 'cancelled') { if (btn) { btn.classList.remove('loading'); btn.textContent = '🚪 Leave'; } updateGroupFooter(); return; }
+    if (res.status === 'left') { logLeftGroup(g, { deleted: res.deleted, silent }); groups = groups.filter(x => x.id !== id); selectedGroups.delete(id); const info = res.deleted ? ` · 🧹 ${res.deleted} msg` : '';
+      if (row) { row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s'; row.style.opacity = '0'; row.style.transform = 'translateX(24px)'; row.style.maxHeight = row.offsetHeight + 'px'; requestAnimationFrame(() => { row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0'; row.style.borderBottom = 'none'; }); setTimeout(() => { const top = gListEl.scrollTop; renderGroups(); gListEl.scrollTop = top; updateGroupFooter(`✅ Left${info}.`); }, 260); } else { renderGroups(); updateGroupFooter(`✅ Left${info}.`); }
+    } else { if (btn) { btn.classList.remove('loading'); btn.classList.add('err'); btn.textContent = '✕ Failed'; } updateGroupFooter(`⚠️ Failed.`); }
   }
 
   gListEl.addEventListener('click', async e => {
-    const row = e.target.closest('.dt-row');
-    if (!row) return;
-    const id = row.dataset.id;
-
+    const row = e.target.closest('.dt-row'); if (!row) return; const id = row.dataset.id;
     if (e.target.closest('.dt-av, .dt-name, .dt-open')) { navigateToChannel(id); return; }
-
-    const rmBtn = e.target.closest('.dt-rm');
-    if (rmBtn) {
-      e.stopPropagation();
-      if (rmBtn.classList.contains('loading') || rmBtn.classList.contains('err')) return;
-      if (!rmBtn.dataset.armed) {
-        rmBtn.dataset.armed = '1'; rmBtn.classList.add('armed'); rmBtn.textContent = '⚠ sure?';
-        rmBtn._timer = setTimeout(() => {
-          if (!rmBtn.isConnected) return;
-          delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave';
-        }, 3000);
-        return;
-      }
-      clearTimeout(rmBtn._timer); delete rmBtn.dataset.armed;
-      rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave';
-      await leaveOneGroupRow(id, rmBtn, row);
-      return;
-    }
-
-    const cb = row.querySelector('.dt-cb');
-    if (e.target !== cb) cb.checked = !cb.checked;
-    cb.checked ? selectedGroups.add(id) : selectedGroups.delete(id);
-    row.classList.toggle('sel', cb.checked);
-    updateGroupFooter();
+    const rmBtn = e.target.closest('.dt-rm'); if (rmBtn) { e.stopPropagation(); if (rmBtn.classList.contains('loading') || rmBtn.classList.contains('err')) return; if (!rmBtn.dataset.armed) { rmBtn.dataset.armed = '1'; rmBtn.classList.add('armed'); rmBtn.textContent = '⚠ sure?'; rmBtn._timer = setTimeout(() => { if (!rmBtn.isConnected) return; delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave'; }, 3000); return; } clearTimeout(rmBtn._timer); delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave'; await leaveOneGroupRow(id, rmBtn, row); return; }
+    const cb = row.querySelector('.dt-cb'); if (e.target !== cb) cb.checked = !cb.checked; cb.checked ? selectedGroups.add(id) : selectedGroups.delete(id); row.classList.toggle('sel', cb.checked); updateGroupFooter();
   });
 
-  let _gSearchTimer = null;
-  $('dt-g-q').addEventListener('input', () => {
-    clearTimeout(_gSearchTimer);
-    _gSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderGroups(); }, 180);
-  });
-  ['dt-g-sort', 'dt-g-from', 'dt-g-to', 'dt-g-ic'].forEach(id => {
-    $(id).addEventListener('change', () => { saveCurrentPrefs(); renderGroups(); });
-  });
-  $('dt-g-dir').onclick = e => {
-    sortDirGroup = sortDirGroup === 'desc' ? 'asc' : 'desc';
-    e.currentTarget.textContent = sortDirGroup === 'desc' ? '↓' : '↑';
-    saveCurrentPrefs(); renderGroups();
-  };
-  $('dt-g-selall').onchange = e => {
-    if (e.target.checked) visibleGroups.forEach(g => selectedGroups.add(g.id));
-    else visibleGroups.forEach(g => selectedGroups.delete(g.id));
-    renderGroups();
-  };
-  box.querySelectorAll('#dt-g-chips .dt-chip').forEach(chip => {
-    chip.onclick = () => {
-      box.querySelectorAll('#dt-g-chips .dt-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      activeChipGroup = chip.dataset.chip;
-      saveCurrentPrefs(); renderGroups();
-    };
-  });
+  let _gSearchTimer = null; $('dt-g-q').addEventListener('input', () => { clearTimeout(_gSearchTimer); _gSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderGroups(); }, 180); });
+  ['dt-g-from', 'dt-g-to', 'dt-g-ic'].forEach(id => $(id).addEventListener('change', () => { saveCurrentPrefs(); renderGroups(); }));
+  $('dt-g-sort').addEventListener('change', () => { updateGroupDirLabel(); saveCurrentPrefs(); renderGroups(); }); $('dt-g-dir').onclick = () => { sortDirGroup = sortDirGroup === 'desc' ? 'asc' : 'desc'; updateGroupDirLabel(); saveCurrentPrefs(); renderGroups(); };
+  $('dt-g-selall').onchange = e => { if (e.target.checked) visibleGroups.forEach(g => selectedGroups.add(g.id)); else visibleGroups.forEach(g => selectedGroups.delete(g.id)); renderGroups(); };
+  box.querySelectorAll('#dt-g-chips .dt-chip').forEach(chip => { chip.onclick = () => { box.querySelectorAll('#dt-g-chips .dt-chip').forEach(c => c.classList.remove('active')); chip.classList.add('active'); activeChipGroup = chip.dataset.chip; saveCurrentPrefs(); renderGroups(); }; });
 
   // ════════════════════════════════════════════════════════
   //  NOT FRIENDS TAB
   // ════════════════════════════════════════════════════════
   const selectedNotFriends = new Set();
-
   const getVisibleNotFriends = () => {
-    const q = $('dt-n-q').value.trim().toLowerCase();
-    let l = notFriends.filter(n => {
-      const u = n.user;
+    const q = $('dt-n-q').value.trim().toLowerCase(); let l = notFriends.filter(n => { const u = n.user;
       if (q && !(`${u.username} ${u.global_name ?? ''} ${n.id}`.toLowerCase().includes(q))) return false;
-      if (activeChipNotFriends === 'withmsg' && notFriendsMsgMode === 'with'    && !(n.count > 0))  return false;
+      if (activeChipNotFriends === 'withmsg' && notFriendsMsgMode === 'with' && !(n.count > 0)) return false;
       if (activeChipNotFriends === 'withmsg' && notFriendsMsgMode === 'without' && !(n.count === 0 && n.anyMessage)) return false;
-      if (activeChipNotFriends === 'empty'    && !(n.count === 0 && !n.anyMessage))     return false;
-      if (activeChipNotFriends === 'newacct'  && !isNewAccount({ created: n.created })) return false;
-      if (activeChipNotFriends === 'noavatar' && u.avatar)                              return false;
-      if (activeChipNotFriends === 'status') {
-        const st = getStatus(n.id);
-        if (st !== statusFilterNotFriends) return false;
-      }
+      if (activeChipNotFriends === 'empty' && !(n.count === 0 && !n.anyMessage)) return false;
+      if (activeChipNotFriends === 'newacct' && !isNewAccount({ created: n.created })) return false;
+      if (activeChipNotFriends === 'noavatar' && u.avatar) return false;
+      if (activeChipNotFriends === 'status' && getStatus(n.id) !== statusFilterNotFriends) return false;
       return true;
     });
-    const key = $('dt-n-sort').value;
-    const m = sortDirNotFriends === 'asc' ? 1 : -1;
-    const val = {
-      lastdm:  n => n.last?.getTime() ?? (m === 1 ? Infinity : -Infinity),
-      created: n => n.created.getTime(),
-      count:   n => n.count < 0 ? -1 : n.count,
-    };
-    l.sort((a, b) => key === 'name'
-      ? m * displayName(a.user).localeCompare(displayName(b.user), undefined, { sensitivity: 'base' })
-      : m * (val[key](a) - val[key](b)));
-    return l;
+    const key = $('dt-n-sort').value, m = sortDirNotFriends === 'asc' ? 1 : -1, emptyTs = m === 1 ? Infinity : -Infinity; const val = { lastdm: n => n.last?.getTime() ?? emptyTs, created: n => n.created.getTime(), count: n => n.count < 0 ? -1 : n.count };
+    l.sort((a, b) => key === 'name' ? m * displayName(a.user).localeCompare(displayName(b.user), undefined, { sensitivity: 'base' }) : m * (val[key](a) - val[key](b))); return l;
   };
-
   const notFriendRowHtml = n => {
-    const u = n.user;
-    const badges = badgesForNotFriend(n).map(b =>
-      `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`
-    ).join('');
-    const countTxt = n.count < 0 ? '…' : n.count;
-    return `<div class="dt-row ${selectedNotFriends.has(n.id) ? 'sel' : ''}" data-id="${n.id}">
-      <input type="checkbox" class="dt-cb" ${selectedNotFriends.has(n.id) ? 'checked' : ''}>
-      ${avatarWithStatus(u, 40)}
-      <div class="dt-info">
-        <div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div>
-        <div class="dt-sub">💬 ${countTxt} message(s) from you · Last DM ${n.last ? fmtRelative(n.last) : 'unknown'} · Account created ${fmtDate(n.created)}</div>
-      </div>
-      <div class="dt-badges">${badges}</div>
-      <div class="dt-actions">
-<button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
-        <button class="dt-cl" title="Delete all your messages and close the DM (click twice)">🧹 Clean</button>
-      </div>
-    </div>`;
+    const u = n.user; const badges = badgesForNotFriend(n).map(b => `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`).join(''); const countTxt = n.count < 0 ? '…' : n.count;
+    return `<div class="dt-row ${selectedNotFriends.has(n.id) ? 'sel' : ''}" data-id="${n.id}"><input type="checkbox" class="dt-cb" ${selectedNotFriends.has(n.id) ? 'checked' : ''}>${avatarWithStatus(u, 40)}<div class="dt-info"><div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div><div class="dt-sub">💬 ${countTxt} message(s) from you · Last DM ${n.last ? fmtRelative(n.last) : 'unknown'} · Created ${fmtDate(n.created)}</div></div><div class="dt-badges">${badges}</div><div class="dt-actions"><button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button><button class="dt-cl" title="Clean + close (click twice)">🧹 Clean</button></div></div>`;
   };
-
-  const updateNotFriendsFooter = (msg) => {
-    const sa = $('dt-n-selall');
-    if (sa) {
-      const k = visibleNotFriends.filter(n => selectedNotFriends.has(n.id)).length;
-      sa.checked = visibleNotFriends.length > 0 && k === visibleNotFriends.length;
-      sa.indeterminate = k > 0 && k < visibleNotFriends.length;
-    }
-    $('dt-ncount').textContent = notFriends.length;
-    if (activeTab === 'notfriends') {
-      delBtn.disabled = busy || selectedNotFriends.size === 0;
-      delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`;
-      statusEl.textContent = msg ?? `${visibleNotFriends.length} shown / ${notFriends.length} non-friend DM(s) · ${selectedNotFriends.size} selected`;
-    }
-  };
-
+  const updateNotFriendsFooter = (msg) => { const sa = $('dt-n-selall'); if (sa) { const k = visibleNotFriends.filter(n => selectedNotFriends.has(n.id)).length; sa.checked = visibleNotFriends.length > 0 && k === visibleNotFriends.length; sa.indeterminate = k > 0 && k < visibleNotFriends.length; } $('dt-ncount').textContent = notFriends.length; if (activeTab === 'notfriends') { delBtn.disabled = busy || selectedNotFriends.size === 0; delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`; statusEl.textContent = msg ?? `${visibleNotFriends.length} shown / ${notFriends.length} DM(s) · ${selectedNotFriends.size} selected`; } };
   let _lastNotFriendsHash = '';
-  const renderNotFriends = (force = false) => {
-    visibleNotFriends = getVisibleNotFriends();
-    const hash = visibleNotFriends.map(n => n.id + ':' + n.count).join(',');
-    if (!force && hash === _lastNotFriendsHash) {
-      updateNotFriendsFooter();
-      refreshStatusDots();
-      return;
-    }
-    _lastNotFriendsHash = hash;
-    nListEl.innerHTML = visibleNotFriends.length ? visibleNotFriends.map(notFriendRowHtml).join('')
-      : `<div class="dt-empty">${notFriends.length === 0 ? 'No DMs with non-friends 🎉' : 'No conversations match the filters.'}</div>`;
-    updateNotFriendsFooter();
-    refreshStatusDots();
+    const renderNotFriends = (force = false) => { 
+    visibleNotFriends = getVisibleNotFriends(); 
+    const hash = visibleNotFriends.map(n => n.id + ':' + n.count + ':' + (selectedNotFriends.has(n.id) ? '1' : '0')).join(','); 
+    if (!force && hash === _lastNotFriendsHash) { updateNotFriendsFooter(); refreshStatusDots(); return; } 
+    _lastNotFriendsHash = hash; 
+    
+    // 👇 MESSAGE MODIFIÉ ICI 👇
+    nListEl.innerHTML = visibleNotFriends.length ? visibleNotFriends.map(notFriendRowHtml).join('') : `<div class="dt-empty">${notFriends.length === 0 ? '🎉 You have no non-friends DMs! 🎉' : 'No matches for your filters.'}</div>`; 
+    
+    updateNotFriendsFooter(); 
+    refreshStatusDots(); 
   };
 
-
-  // ── Not Friends: full scan state ──
-  let notFriendsScanState = 'idle'; // 'idle' | 'running' | 'done'
-  let _nScanRunning = false;
-  let _nScanDone = 0, _nScanTotal = 0;
-  let _nScanFill = null, _nScanText = null;
-
-  function renderNotFriendsProgress() {
-    const pct = _nScanTotal > 0 ? Math.round((_nScanDone / _nScanTotal) * 100) : 0;
-    nListEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:16px;color:#b5bac1;font-size:13px">
-        <div style="font-size:15px;font-weight:600;color:#fff">Scanning your DMs…</div>
-        <div style="width:80%;max-width:420px;height:8px;background:#1e1f22;border-radius:99px;overflow:hidden">
-          <div id="dt-n-progress-fill" style="height:100%;width:${pct}%;background:linear-gradient(90deg,#5865f2,#8891ff);border-radius:99px;transition:width .25s ease"></div>
-        </div>
-        <div id="dt-n-progress-text" style="font-size:12px;color:#949ba4">${_nScanDone} / ${_nScanTotal}</div>
-      </div>`;
-    _nScanFill = document.getElementById('dt-n-progress-fill');
-    _nScanText = document.getElementById('dt-n-progress-text');
-    lockNotFriendsControls(true);
-  }
-
-  function lockNotFriendsControls(locked) {
-    const panel = box.querySelector('[data-panel="notfriends"]');
-    if (!panel) return;
-    const selectors = [
-      '#dt-n-q',
-      '#dt-n-sort',
-      '#dt-n-dir',
-      '#dt-n-selall',
-      '#dt-n-chips .dt-chip',
-    ];
-    selectors.forEach(sel => {
-      panel.querySelectorAll(sel).forEach(el => {
-        el.disabled = locked;
-        el.style.pointerEvents = locked ? 'none' : '';
-        el.style.opacity = locked ? '0.45' : '';
-        el.style.cursor = locked ? 'not-allowed' : '';
-      });
-    });
-  }
-
-  async function pMap(items, fn, concurrency = 4) {
-    const results = new Array(items.length);
-    let i = 0;
-    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-      while (i < items.length) {
-        const idx = i++;
-        results[idx] = await fn(items[idx], idx);
-      }
-    });
-    await Promise.all(workers);
-    return results;
-  }
-
-  async function scanChannelFast(channelId) {
-    const url = new URL(`${BASE}/channels/${channelId}/messages`);
-    url.searchParams.set("limit", "100");
-    const r = await apiFetch(url.toString());
-    if (!r.ok) return { count: 0, anyMessage: false };
-    const batch = await r.json();
-    return {
-      count: batch.filter(isMyMessage).length,
-      anyMessage: batch.length > 0,
-    };
-  }
-
+  let notFriendsScanState = 'idle', _nScanRunning = false, _nScanDone = 0, _nScanTotal = 0, _nScanFill = null, _nScanText = null;
+  function renderNotFriendsProgress() { const pct = _nScanTotal > 0 ? Math.round((_nScanDone / _nScanTotal) * 100) : 0; nListEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:16px;color:#b5bac1;font-size:13px"><div style="font-size:15px;font-weight:600;color:#fff">Scanning DMs…</div><div style="width:80%;max-width:420px;height:8px;background:#1e1f22;border-radius:99px;overflow:hidden"><div id="dt-n-progress-fill" style="height:100%;width:${pct}%;background:linear-gradient(90deg,#5865f2,#8891ff);border-radius:99px;transition:width .25s ease"></div></div><div id="dt-n-progress-text" style="font-size:12px;color:#949ba4">${_nScanDone} / ${_nScanTotal}</div></div>`; _nScanFill = document.getElementById('dt-n-progress-fill'); _nScanText = document.getElementById('dt-n-progress-text'); lockNotFriendsControls(true); }
+  function lockNotFriendsControls(locked) { const panel = box.querySelector('[data-panel="notfriends"]'); if (!panel) return; ['#dt-n-q', '#dt-n-sort', '#dt-n-dir', '#dt-n-selall', '#dt-n-chips .dt-chip'].forEach(sel => { panel.querySelectorAll(sel).forEach(el => { el.disabled = locked; el.style.pointerEvents = locked ? 'none' : ''; el.style.opacity = locked ? '0.45' : ''; el.style.cursor = locked ? 'not-allowed' : ''; }); }); }
+  async function pMap(items, fn, concurrency = 4) { const results = new Array(items.length); let i = 0; const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => { while (i < items.length) { const idx = i++; results[idx] = await fn(items[idx], idx); } }); await Promise.all(workers); return results; }
+  async function scanChannelFast(channelId) { const url = new URL(`${BASE}/channels/${channelId}/messages`); url.searchParams.set("limit", "100"); const r = await apiFetch(url.toString()); if (!r.ok) return { count: 0, anyMessage: false }; const batch = await r.json(); return { count: batch.filter(isMyMessage).length, anyMessage: batch.length > 0 }; }
   async function scanAllNotFriends() {
-    if (_nScanRunning) return;
-    _nScanRunning = true;
-    notFriendsScanState = 'running';
-
-    _nScanDone = 0;
-    _nScanTotal = notFriends.length;
-    if (activeTab === 'notfriends') renderNotFriendsProgress();
-
-    for (const n of notFriends) { n.count = -1; n.anyMessage = undefined; }
-
-    let _updateScheduled = false;
-    const scheduleUI = () => {
-      if (_updateScheduled || activeTab !== 'notfriends') return;
-      _updateScheduled = true;
-      requestAnimationFrame(() => {
-        _updateScheduled = false;
-        if (_nScanFill) _nScanFill.style.width = `${Math.round((_nScanDone / _nScanTotal) * 100)}%`;
-        if (_nScanText) _nScanText.textContent = `${_nScanDone} / ${_nScanTotal}`;
-      });
-    };
-
-    await pMap(notFriends, async (n) => {
-      if (!box.isConnected) return;
-      try {
-        const res = await scanChannelFast(n.channelId);
-        n.count = res.count;
-        n.anyMessage = res.anyMessage;
-      } catch { n.count = 0; n.anyMessage = false; }
-      _nScanDone++;
-      scheduleUI();
-      await sleep(10);
-    }, 4);
-
-    notFriendsScanState = 'done';
-    _nScanRunning = false;
-    lockNotFriendsControls(false);
-    if (activeTab === 'notfriends') renderNotFriends();
+    if (_nScanRunning) return; _nScanRunning = true; notFriendsScanState = 'running'; _nScanDone = 0; _nScanTotal = notFriends.length; if (activeTab === 'notfriends') renderNotFriendsProgress(); for (const n of notFriends) { n.count = -1; n.anyMessage = undefined; }
+    let _updateScheduled = false; const scheduleUI = () => { if (_updateScheduled || activeTab !== 'notfriends') return; _updateScheduled = true; requestAnimationFrame(() => { _updateScheduled = false; if (_nScanFill) _nScanFill.style.width = `${Math.round((_nScanDone / _nScanTotal) * 100)}%`; if (_nScanText) _nScanText.textContent = `${_nScanDone} / ${_nScanTotal}`; }); };
+    await pMap(notFriends, async (n) => { if (!box.isConnected) return; try { const res = await scanChannelFast(n.channelId); n.count = res.count; n.anyMessage = res.anyMessage; } catch { n.count = 0; n.anyMessage = false; } _nScanDone++; scheduleUI(); await sleep(10); }, 4);
+    notFriendsScanState = 'done'; _nScanRunning = false; lockNotFriendsControls(false); if (activeTab === 'notfriends') renderNotFriends();
   }
-
-  function ensureNotFriendsScanned() {
-    if (notFriendsScanState === 'done') {
-      renderNotFriends();
-      return;
-    }
-    if (notFriendsScanState === 'running') {
-      renderNotFriendsProgress();
-      return;
-    }
-    scanAllNotFriends();
-  }
+  function ensureNotFriendsScanned() { if (notFriendsScanState === 'done') { renderNotFriends(); return; } if (notFriendsScanState === 'running') { renderNotFriendsProgress(); return; } scanAllNotFriends(); }
 
   async function cleanOneNotFriend(id, btn) {
-    if (busy) return;
-    const n = notFriends.find(x => x.id === id);
-    if (!n) return;
-    const name = displayName(n.user);
-
-    busy = true;
-    if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
-    statusEl.textContent = `🧹 Cleaning DM with ${name}…`;
-
-    const progress = createProgressOverlay('clean');
-    let res = null;
-    try { res = await cleanChannelMessages({ id: n.channelId }, progress, name); }
-    catch (e) { console.warn(e); }
-    if (res?.skipped) progress.remove();
-    else progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
-
-    statusEl.textContent = `👋 Closing DM with ${name}…`;
-    const closed = await closeDMChannel(n.channelId);
-
-    pushHistory({
-      kind: 'notfriend',
-      id: n.id,
-      username: n.user.username,
-      global_name: n.user.global_name || null,
-      avatarUrl: avatarUrl(n.user),
-      removedAt: Date.now(),
-      dmDeleted: res?.deleted || 0,
-      dmClosed: closed,
-    });
-
-    notFriends = notFriends.filter(x => x.id !== id);
-    selectedNotFriends.delete(id);
-    busy = false;
-    if (!box.isConnected) return;
-    if (btn?.isConnected) { btn.classList.remove('loading'); btn.textContent = '🧹 Clean'; }
-
-    let msg;
-    if (res?.cancelled)        msg = `⛔ Clean cancelled for ${name} — ${res.deleted}/${res.total} deleted${closed ? ' · 👋 DM closed' : ''}.`;
-    else if (res?.errors > 0)  msg = `⚠️ ${name}: ${res.deleted}/${res.total} deleted — ${res.errors} error(s)${closed ? ' · 👋 DM closed' : ''}.`;
-    else if (res?.deleted > 0) msg = `✅ ${name}: 🧹 ${res.deleted} message${res.deleted > 1 ? 's' : ''} deleted${closed ? ' · 👋 DM closed' : ''}.`;
-    else                       msg = `ℹ️ ${name}: 0 message sent${closed ? ' · 👋 DM closed' : ''}.`;
-
-    const top = nListEl.scrollTop;
-    renderNotFriends();
-    nListEl.scrollTop = top;
-    updateNotFriendsFooter(msg);
+    if (busy) return; const n = notFriends.find(x => x.id === id); if (!n) return; const name = displayName(n.user); busy = true; if (btn) { btn.classList.add('loading'); btn.textContent = '…'; } statusEl.textContent = `🧹 Cleaning DM with ${name}…`;
+    const progress = createProgressOverlay('clean'); let res = null; try { res = await cleanChannelMessages({ id: n.channelId }, progress, name); } catch {}
+    if (res?.skipped) progress.remove(); else progress.finish(res?.deleted ?? 0, res?.total ?? 0, res?.errors ?? 0, res?.cancelled ?? false);
+    statusEl.textContent = `👋 Closing DM…`; const closed = await closeDMChannel(n.channelId);
+    pushHistory({ kind: 'notfriend', id: n.id, username: n.user.username, global_name: n.user.global_name || null, avatarUrl: avatarUrl(n.user), removedAt: Date.now(), dmDeleted: res?.deleted || 0, dmClosed: closed });
+    notFriends = notFriends.filter(x => x.id !== id); selectedNotFriends.delete(id); busy = false; if (!box.isConnected) return; if (btn?.isConnected) { btn.classList.remove('loading'); btn.textContent = '🧹 Clean'; }
+    const top = nListEl.scrollTop; renderNotFriends(); nListEl.scrollTop = top; updateNotFriendsFooter(`✅ Done${closed ? ' · Closed' : ''}.`);
   }
 
   nListEl.addEventListener('click', async e => {
-    const row = e.target.closest('.dt-row');
-    if (!row) return;
-    const id = row.dataset.id;
-
+    const row = e.target.closest('.dt-row'); if (!row) return; const id = row.dataset.id;
     if (e.target.closest('.dt-av, .dt-name')) { openProfile(id); return; }
-
-    const dmBtn = e.target.closest('.dt-dm');
-    if (dmBtn) {
-      e.stopPropagation();
-      if (dmBtn.classList.contains('loading')) return;
-      dmBtn.classList.add('loading');
-      const nf = notFriends.find(x => x.id === id);
-      if (nf) navigateToChannel(nf.channelId);
-      setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400);
-      return;
-    }
-
-    const clBtn = e.target.closest('.dt-cl');
-    if (clBtn) {
-      e.stopPropagation();
-      if (clBtn.classList.contains('loading')) return;
-      if (!clBtn.dataset.armed) {
-        clBtn.dataset.armed = '1'; clBtn.classList.add('armed'); clBtn.textContent = '⚠ sure?';
-        clBtn._timer = setTimeout(() => {
-          if (!clBtn.isConnected) return;
-          delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean';
-        }, 3000);
-        return;
-      }
-      clearTimeout(clBtn._timer); delete clBtn.dataset.armed;
-      clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean';
-      await cleanOneNotFriend(id, clBtn);
-      return;
-    }
-
-    const cb = row.querySelector('.dt-cb');
-    if (e.target !== cb) cb.checked = !cb.checked;
-    cb.checked ? selectedNotFriends.add(id) : selectedNotFriends.delete(id);
-    row.classList.toggle('sel', cb.checked);
-    updateNotFriendsFooter();
+    const dmBtn = e.target.closest('.dt-dm'); if (dmBtn) { e.stopPropagation(); if (dmBtn.classList.contains('loading')) return; dmBtn.classList.add('loading'); const nf = notFriends.find(x => x.id === id); if (nf) navigateToChannel(nf.channelId); setTimeout(() => { if (dmBtn.isConnected) dmBtn.classList.remove('loading'); }, 400); return; }
+    const clBtn = e.target.closest('.dt-cl'); if (clBtn) { e.stopPropagation(); if (clBtn.classList.contains('loading')) return; if (!clBtn.dataset.armed) { clBtn.dataset.armed = '1'; clBtn.classList.add('armed'); clBtn.textContent = '⚠ sure?'; clBtn._timer = setTimeout(() => { if (!clBtn.isConnected) return; delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean'; }, 3000); return; } clearTimeout(clBtn._timer); delete clBtn.dataset.armed; clBtn.classList.remove('armed'); clBtn.textContent = '🧹 Clean'; await cleanOneNotFriend(id, clBtn); return; }
+    const cb = row.querySelector('.dt-cb'); if (e.target !== cb) cb.checked = !cb.checked; cb.checked ? selectedNotFriends.add(id) : selectedNotFriends.delete(id); row.classList.toggle('sel', cb.checked); updateNotFriendsFooter();
   });
 
-  let _nSearchTimer = null;
-  $('dt-n-q').addEventListener('input', () => {
-    clearTimeout(_nSearchTimer);
-    _nSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderNotFriends(); }, 180);
-  });
-  $('dt-n-sort').addEventListener('change', () => { saveCurrentPrefs(); renderNotFriends(); });
-  $('dt-n-dir').onclick = e => {
-    sortDirNotFriends = sortDirNotFriends === 'desc' ? 'asc' : 'desc';
-    e.currentTarget.textContent = sortDirNotFriends === 'desc' ? '↓' : '↑';
-    saveCurrentPrefs(); renderNotFriends();
+  let _nSearchTimer = null; $('dt-n-q').addEventListener('input', () => { clearTimeout(_nSearchTimer); _nSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderNotFriends(); }, 180); });
+  $('dt-n-sort').addEventListener('change', () => { updateNotFriendsDirLabel(); saveCurrentPrefs(); renderNotFriends(); }); $('dt-n-dir').onclick = () => { sortDirNotFriends = sortDirNotFriends === 'desc' ? 'asc' : 'desc'; updateNotFriendsDirLabel(); saveCurrentPrefs(); renderNotFriends(); };
+   // 🔄 AJOUT : Faire fonctionner le bouton Rescan
+  $('dt-n-rescan').onclick = () => {
+    if (busy || _nScanRunning) return; // Si déjà en train de scanner, on ne fait rien
+    notFriendsScanState = 'idle'; // Réinitialise l'état pour forcer le scan
+    ensureNotFriendsScanned(); // Relance le scan de tous les messages
   };
-  $('dt-n-selall').onchange = e => {
-    if (e.target.checked) visibleNotFriends.forEach(n => selectedNotFriends.add(n.id));
-    else visibleNotFriends.forEach(n => selectedNotFriends.delete(n.id));
-    renderNotFriends();
-  };
+  $('dt-n-selall').onchange = e => { if (e.target.checked) visibleNotFriends.forEach(n => selectedNotFriends.add(n.id)); else visibleNotFriends.forEach(n => selectedNotFriends.delete(n.id)); renderNotFriends(); };
   box.querySelectorAll('#dt-n-chips .dt-chip').forEach(chip => {
-    chip.onclick = () => {
-      if (notFriendsScanState === 'running' || _nScanRunning) return;
-
-      const chipName = chip.dataset.chip;
-      const alreadyOnThisChip = chip.classList.contains('active') && activeChipNotFriends === chipName;
-
-      // 🔄 Chip "withmsg" : toggle with/without
-      if (chipName === 'withmsg' && alreadyOnThisChip) {
-        notFriendsMsgMode = notFriendsMsgMode === 'with' ? 'without' : 'with';
-        const label = document.getElementById('dt-n-msg-label');
-        if (label) label.textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages';
-        saveCurrentPrefs();
-        renderNotFriends();
-        return;
-      }
-
-      // 🔄 Chip "status" : cycle entre online → idle → dnd → offline
-      if (chipName === 'status' && alreadyOnThisChip) {
-        const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterNotFriends);
-        const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length];
-        statusFilterNotFriends = next;
-        const { icon, label } = STATUS_FILTER_LABEL[next];
-        const labelEl = document.getElementById('dt-n-status-label');
-        if (labelEl) labelEl.textContent = `${icon} ${label}`;
-        saveCurrentPrefs();
-        renderNotFriends();
-        return;
-      }
-
-      // Sinon : switch de chip normal
-      box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-      activeChipNotFriends = chipName;
-
-      // 👁️ Cache/affiche la flèche du chip statut
-      {
-        const arrowEl = document.getElementById('dt-n-status-arrow');
-        if (arrowEl) arrowEl.style.display = (chipName === 'status') ? '' : 'none';
-      }
-
-      // 👁️ Cache/affiche la flèche du chip "with messages"
-      {
-        const arrowEl = document.getElementById('dt-n-msg-arrow');
-        if (arrowEl) arrowEl.style.display = (chipName === 'withmsg') ? '' : 'none';
-      }
-
-      saveCurrentPrefs(); renderNotFriends();
-    };
+    chip.onclick = () => { if (notFriendsScanState === 'running' || _nScanRunning) return; const chipName = chip.dataset.chip; const alreadyOnThisChip = chip.classList.contains('active') && activeChipNotFriends === chipName;
+      if (chipName === 'withmsg' && alreadyOnThisChip) { notFriendsMsgMode = notFriendsMsgMode === 'with' ? 'without' : 'with'; document.getElementById('dt-n-msg-label').textContent = notFriendsMsgMode === 'with' ? '💬 With my messages' : '🚫 Without my messages'; saveCurrentPrefs(); renderNotFriends(); return; }
+      if (chipName === 'status' && alreadyOnThisChip) { const idx = STATUS_FILTER_CYCLE.indexOf(statusFilterNotFriends); const next = STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length]; statusFilterNotFriends = next; document.getElementById('dt-n-status-label').textContent = `${STATUS_FILTER_LABEL[next].icon} ${STATUS_FILTER_LABEL[next].label}`; saveCurrentPrefs(); renderNotFriends(); return; }
+      box.querySelectorAll('#dt-n-chips .dt-chip').forEach(c => c.classList.remove('active')); chip.classList.add('active'); activeChipNotFriends = chipName; document.getElementById('dt-n-status-arrow').style.display = (chipName === 'status') ? '' : 'none'; document.getElementById('dt-n-msg-arrow').style.display = (chipName === 'withmsg') ? '' : 'none'; saveCurrentPrefs(); renderNotFriends(); };
   });
 
   // ════════════════════════════════════════════════════════
-  //  HISTORY TAB (universal)
+  //  SERVERS TAB
   // ════════════════════════════════════════════════════════
-  const historyRowHtml = h => {
-    const isGroup = h.kind === 'group';
-    const isNotFriend = h.kind === 'notfriend';
-    const name = isGroup ? h.name : (h.global_name || h.username);
-    const sub  = (isGroup || isNotFriend) ? null : `@${h.username}`;
-    const tags = [];
+  const selectedServers = new Set();
+  let _sSettingsLoading = false, _sSettingsDone = 0, _sSettingsTotal = 0, _sSettingsFill = null, _sSettingsText = null, _sSettingsErr = 0;
+  
+  function renderServersProgress() { const pct = _sSettingsTotal > 0 ? Math.round((_sSettingsDone / _sSettingsTotal) * 100) : 0; const errTxt = _sSettingsErr > 0 ? ` · ⚠️ ${_sSettingsErr} err` : ''; sListEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:16px;color:#b5bac1;font-size:13px"><div style="font-size:15px;font-weight:600;color:#fff">Loading server settings…</div><div style="width:80%;max-width:420px;height:8px;background:#1e1f22;border-radius:99px;overflow:hidden"><div id="dt-s-progress-fill" style="height:100%;width:${pct}%;background:linear-gradient(90deg,#5865f2,#8891ff);border-radius:99px;transition:width .25s ease"></div></div><div id="dt-s-progress-text" style="font-size:12px;color:#949ba4">${_sSettingsDone} / ${_sSettingsTotal}${errTxt}</div></div>`; _sSettingsFill = document.getElementById('dt-s-progress-fill'); _sSettingsText = document.getElementById('dt-s-progress-text'); }
 
-    if (isGroup) {
-      tags.push(`<span class="dt-hist-tag group">👥 Group</span>`);
-      if (h.msgDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.msgDeleted} msg deleted</span>`);
-      else tags.push(`<span class="dt-hist-tag grey">Messages kept</span>`);
-      tags.push(h.silent ? `<span class="dt-hist-tag">🔇 silent</span>` : `<span class="dt-hist-tag orange">🔔 notified</span>`);
-      tags.push(`<span class="dt-hist-tag grey">👥 ${h.size} member${h.size > 1 ? 's' : ''}</span>`);
-    } else if (isNotFriend) {
-      if (h.dmDeleted > 0) {
-        tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`);
-        tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg deleted</span>`);
-        if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 DM closed</span>`);
-      } else {
-        if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 DM closed</span>`);
-        else tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`);
-      }
-    } else {
-      tags.push(`<span class="dt-hist-tag friend">👤 Friend</span>`);
-      if (h.dmDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg deleted</span>`);
-      else if (h.cleaned) tags.push(`<span class="dt-hist-tag green">🧹 DM cleaned</span>`);
-      else tags.push(`<span class="dt-hist-tag grey">DMs kept</span>`);
-      if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 DM closed</span>`);
-      if (h.friendSince) tags.push(`<span class="dt-hist-tag orange" title="Was friends since ${fmtDateTime(h.friendSince)}">📅 ${fmtTsRelative(h.friendSince)}</span>`);
-    }
+  const SERVER_FILTERS = { all: () => true, owned: s => s.owner, muted: s => s.muted, unmuted: s => !s.muted, recent: s => isNewServer(s), old: s => isOldServer(s) };
+  const getVisibleServers = () => {
+    const q = $('dt-s-q').value.trim().toLowerCase(); const filt = SERVER_FILTERS[activeChipServer] || SERVER_FILTERS.all;
+    const l = servers.filter(s => { if (q && !(`${s.name} ${s.id}`.toLowerCase().includes(q))) return false; return filt(s); });
+    const key = $('dt-s-sort').value, m = sortDirServer === 'asc' ? 1 : -1;
+    l.sort((a, b) => { if (key === 'name') return m * a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }); if (key === 'default') return -m * (a.originalIndex - b.originalIndex); return m * (a.created.getTime() - b.created.getTime()); }); return l;
+  };
+  const serverRowHtml = s => {
+    const av = s.icon
+      ? `<img class="dt-av" loading="lazy" src="${serverIconUrl(s)}" title="Open server">`
+      : `<div class="dt-av dt-av-ph" title="Open server" style="background:linear-gradient(135deg,#5865f2,#4752c4)">${esc((s.name[0] || '?').toUpperCase())}</div>`;
 
-    const av = isGroup
-      ? (h.iconUrl
-          ? `<img class="dt-av" style="cursor:default" loading="lazy" src="${h.iconUrl}" onerror="this.style.opacity=.4">`
-          : `<div class="dt-av dt-av-ph ${h.solo ? 'solo' : ''}" style="cursor:default">👥</div>`)
-      : `<div class="dt-av-wrap" style="width:40px;height:40px">
-          <svg class="dt-av-svg" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
-            <foreignObject x="0" y="0" width="40" height="40" mask="url(#svg-mask-avatar-status-round-80)">
-              <img src="${h.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">
-            </foreignObject>
-          </svg>
-        </div>`;
+    const muteClass = s.muted ? 'on' : '';
+    const muteIcon = s.muted ? '🔕' : '🔔';
+    const muteTitle = s.muted ? 'Unmute server' : 'Mute server (choose duration)';
 
-    const ts = h.removedAt || h.leftAt;
-    const action = isGroup ? 'Left' : (isNotFriend ? 'Cleaned' : 'Removed');
-const actions = isGroup ? '' : `<button class="dt-dm dt-h-view" title="Open profile"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>`;
-
-    return `<div class="dt-row dt-hrow" data-id="${h.id}" data-kind="${h.kind}">
+    // ⚠️ Plus aucun badge ici, juste l'avatar, le nom, et les boutons d'action.
+    return `<div class="dt-row ${selectedServers.has(s.id) ? 'sel' : ''}" data-id="${s.id}">
+      <input type="checkbox" class="dt-cb" ${selectedServers.has(s.id) ? 'checked' : ''}>
       ${av}
       <div class="dt-info">
-        <div class="dt-name" style="cursor:default;text-decoration:none">${esc(name)}${sub ? `<span>${esc(sub)}</span>` : ''}</div>
-        <div class="dt-hist-meta">${tags.join('')}</div>
-        <div class="dt-hist-date">${action} ${fmtTsRelative(ts)} · ${fmtDateTime(ts)}</div>
+        <div class="dt-name" title="Open server">${esc(s.name)}</div>
+        <div class="dt-sub">Joined ${fmtDate(s.created)} (${fmtRelative(s.created)}) · ID ${s.id}</div>
       </div>
-      <div class="dt-actions">${actions}</div>
+      <div class="dt-actions">
+        <button class="dt-s-mute ${muteClass}" title="${muteTitle}">${muteIcon}</button>
+        <button class="dt-s-settings" title="Server settings">⚙️</button>
+        <button class="dt-open" title="Open server"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>
+        <button class="dt-rm" title="Leave server (click twice)">🚪 Leave</button>
+      </div>
     </div>`;
   };
+  const updateServerFooter = (msg) => {
+    const sa = $('dt-s-selall'); if (sa) { const n = visibleServers.filter(s => selectedServers.has(s.id)).length; sa.checked = visibleServers.length > 0 && n === visibleServers.length; sa.indeterminate = n > 0 && n < visibleServers.length; } $('dt-scount').textContent = servers.length;
+    if (activeTab === 'servers') { 
+      delBtn.disabled = busy || selectedServers.size === 0; 
+      delBtn.textContent = `🚪 Leave selected (${selectedServers.size})`; 
+      
+      // ✅ Ajoute cette ligne
+      $('dt-s-bulk-settings').disabled = busy || selectedServers.size === 0;
+      
+      $('dt-s-mute-all').disabled = busy || selectedServers.size === 0; 
+      $('dt-s-unmute-all').disabled = busy || selectedServers.size === 0; 
+      const owned = servers.filter(s => s.owner).length; statusEl.textContent = msg ?? `${visibleServers.length} shown / ${servers.length} server(s)${owned ? ` (${owned} owned)` : ''} · ${selectedServers.size} selected`; 
+    }
+  };
+  let _lastServersHash = '';
+  const renderServers = (force = false) => { if (_sSettingsLoading) { renderServersProgress(); return; } visibleServers = getVisibleServers(); const hash = visibleServers.map(s => s.id + ':' + (s.muted ? '1' : '0') + ':' + (selectedServers.has(s.id) ? '1' : '0')).join(','); if (!force && hash === _lastServersHash) { updateServerFooter(); return; } _lastServersHash = hash; sListEl.innerHTML = visibleServers.length ? visibleServers.map(serverRowHtml).join('') : `<div class="dt-empty">${servers.length === 0 ? 'No servers 🎉' : 'No matches.'}</div>`; updateServerFooter(); };
 
-  function renderHistory() {
-    const hq = $('dt-hq').value.trim().toLowerCase();
-    const hf = $('dt-hfilter').value;
-    const list = history.filter(h => {
-      if (hf !== 'all' && h.kind !== hf) return false;
-      if (!hq) return true;
-      const name = h.kind === 'group' ? h.name : `${h.username} ${h.global_name || ''}`;
-      return `${name} ${h.id}`.toLowerCase().includes(hq);
-    });
-    hListEl.innerHTML = list.length
-      ? list.map(historyRowHtml).join('')
-      : `<div class="dt-empty">${history.length === 0 ? 'No history yet — removed friends, left groups and cleaned non-friend DMs will appear here.' : 'No entries match your filters.'}</div>`;
-    $('dt-hcount').textContent = history.length;
-    const totalMsg = history.reduce((s, h) => s + (h.dmDeleted || h.msgDeleted || 0), 0);
-    const friendCount = history.filter(h => h.kind === 'friend').length;
-    const groupCount  = history.filter(h => h.kind === 'group').length;
-    const nfCount     = history.filter(h => h.kind === 'notfriend').length;
-    $('dt-hstats').textContent = history.length > 0
-      ? `${friendCount}👤 · ${groupCount}👥 · ${nfCount}💬 · 🧹 ${totalMsg} msg`
-      : '';
+  async function toggleMuteServer(server, duration = -1) {
+    if (busy) return false; busy = true; const newMuted = !server.muted; statusEl.textContent = `${newMuted ? '🔕 Muting' : '🔔 Unmuting'} ${server.name}…`;
+    const settings = { muted: newMuted, mute_config: newMuted ? { end_time: duration > 0 ? new Date(Date.now() + duration * 1000).toISOString() : null, selected_time_window: duration } : null };
+    const ok = await updateGuildSettingsAPI(server.id, settings, ({ waitMs, attempt, max }) => statusEl.textContent = `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s`); busy = false;
+    if (ok) { applyGuildSettingsToServer(server, ok); renderServers(true); updateServerFooter(newMuted ? `🔕 Muted` : `🔔 Unmuted`); return true; }
+    updateServerFooter(`⚠️ Failed`); return false;
+  }
+  const fmtDuration = sec => { if (sec >= 86400) return `${Math.round(sec / 86400)}d`; if (sec >= 3600) return `${Math.round(sec / 3600)}h`; if (sec >= 60) return `${Math.round(sec / 60)}min`; return `${sec}s`; };
+  async function askMuteDuration(server) { return await choiceDialog({ title: `🔕 Mute ${esc(server.name)}`, message: `Choose duration:`, choices: [{ label: '15 min', value: 900 }, { label: '1 hour', value: 3600 }, { label: '8 hours', value: 28800 }, { label: '24 hours', value: 86400 }, { label: 'Forever', value: -1, danger: true }, { label: 'Cancel', value: null }] }); }
+  async function handleMuteClick(server) { if (busy) return; if (server.muted) { await toggleMuteServer(server); return; } const duration = await askMuteDuration(server); if (duration === null) return; await toggleMuteServer(server, duration); }
+  async function handleServerSettingsClick(server) {
+    if (busy) return; const newState = await openServerSettingsModal(server); if (!newState) return; busy = true; statusEl.textContent = `💾 Saving…`;
+    const settings = { muted: newState.muted, mute_config: newState.muted ? { end_time: newState.muteDuration > 0 ? new Date(Date.now() + newState.muteDuration * 1000).toISOString() : null, selected_time_window: newState.muteDuration } : null, message_notifications: newState.notifications, suppress_everyone: newState.suppressEveryone, suppress_roles: newState.suppressRoles, mobile_push: newState.mobilePush };
+    const ok = await updateGuildSettingsAPI(server.id, settings, ({ waitMs, attempt, max }) => statusEl.textContent = `🐢 Rate limited — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s`); busy = false;
+    if (ok) { applyGuildSettingsToServer(server, ok); renderServers(true); updateServerFooter(`✅ Saved`); } else updateServerFooter(`⚠️ Failed`);
+  }
+  async function leaveOneServer(id, btn, row) {
+    if (busy) return; const s = servers.find(x => x.id === id); if (!s) return; busy = true; if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
+    const v = await choiceDialog({ title: `Leave ${esc(s.name)}?`, message: `You're about to leave. ${s.owner ? '⚠️ You own this server!' : ''}<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🚪 Leave', value: 'leave', danger: true }] });
+    if (v !== 'leave') { busy = false; if (btn) { btn.classList.remove('loading'); btn.textContent = '🚪 Leave'; } if (box.isConnected) updateServerFooter(); return; }
+    statusEl.textContent = `🚪 Leaving…`; const ok = await leaveGuildAPI(s.id); busy = false; if (!box.isConnected) return;
+    if (ok) { pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); servers = servers.filter(x => x.id !== id); selectedServers.delete(id); if (row) { row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s'; row.style.opacity = '0'; row.style.transform = 'translateX(24px)'; row.style.maxHeight = row.offsetHeight + 'px'; requestAnimationFrame(() => { row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0'; row.style.borderBottom = 'none'; }); setTimeout(() => { const top = sListEl.scrollTop; renderServers(true); sListEl.scrollTop = top; updateServerFooter(`✅ Left.`); }, 260); } else { renderServers(true); updateServerFooter(`✅ Left.`); }
+    } else { if (btn) { btn.classList.remove('loading'); btn.classList.add('err'); btn.textContent = '✕ Failed'; } updateServerFooter(`⚠️ Failed.`); }
   }
 
-  hListEl.addEventListener('click', e => {
-    const row = e.target.closest('.dt-row');
-    if (!row) return;
-    const id = row.dataset.id, kind = row.dataset.kind;
-    if ((kind === 'friend' || kind === 'notfriend') && e.target.closest('.dt-h-view, .dt-av, .dt-name')) openProfile(id);
+  sListEl.addEventListener('click', async e => {
+    const row = e.target.closest('.dt-row'); if (!row) return; const id = row.dataset.id;
+    if (e.target.closest('.dt-av, .dt-name, .dt-open')) { navigateToGuild(id); return; }
+    const muteBtn = e.target.closest('.dt-s-mute'); if (muteBtn) { e.stopPropagation(); const s = servers.find(x => x.id === id); if (s) await handleMuteClick(s); return; }
+    const setBtn = e.target.closest('.dt-s-settings'); if (setBtn) { e.stopPropagation(); const s = servers.find(x => x.id === id); if (s) await handleServerSettingsClick(s); return; }
+    const rmBtn = e.target.closest('.dt-rm'); if (rmBtn) { e.stopPropagation(); if (rmBtn.classList.contains('loading') || rmBtn.classList.contains('err')) return; if (!rmBtn.dataset.armed) { rmBtn.dataset.armed = '1'; rmBtn.classList.add('armed'); rmBtn.textContent = '⚠ sure?'; rmBtn._timer = setTimeout(() => { if (!rmBtn.isConnected) return; delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave'; }, 3000); return; } clearTimeout(rmBtn._timer); delete rmBtn.dataset.armed; rmBtn.classList.remove('armed'); rmBtn.textContent = '🚪 Leave'; await leaveOneServer(id, rmBtn, row); return; }
+    const cb = row.querySelector('.dt-cb'); if (e.target !== cb) cb.checked = !cb.checked; cb.checked ? selectedServers.add(id) : selectedServers.delete(id); row.classList.toggle('sel', cb.checked); updateServerFooter();
   });
 
-  $('dt-hq').addEventListener('input', renderHistory);
-  $('dt-hfilter').addEventListener('change', renderHistory);
-  $('dt-hclear').onclick = async () => {
-    if (history.length === 0) return;
-    const v = await choiceDialog({
-      title: 'Clear history?',
-      message: `This will clear <b style="color:#fff">${history.length}</b> entr${history.length > 1 ? 'ies' : 'y'} from your history.<br><br>
-                <span style="color:#949ba4;font-size:12px">Only the local log is erased.</span><br><br>
-                <span style="color:#faa61a">⚠️ This cannot be undone.</span>`,
-      choices: [
-        { label: 'Cancel',   value: 'cancel' },
-        { label: '🗑 Clear', value: 'clear', danger: true },
-      ],
-    });
-    if (v === 'clear') { clearHistory(); renderHistory(); }
+  let _sSearchTimer = null; $('dt-s-q').addEventListener('input', () => { clearTimeout(_sSearchTimer); _sSearchTimer = setTimeout(() => { saveCurrentPrefs(); renderServers(); }, 180); });
+  $('dt-s-sort').addEventListener('change', () => { updateServerDirLabel(); saveCurrentPrefs(); renderServers(); }); $('dt-s-dir').onclick = () => { sortDirServer = sortDirServer === 'desc' ? 'asc' : 'desc'; updateServerDirLabel(); saveCurrentPrefs(); renderServers(); };
+  $('dt-s-selall').onchange = e => { if (e.target.checked) visibleServers.forEach(s => selectedServers.add(s.id)); else visibleServers.forEach(s => selectedServers.delete(s.id)); renderServers(); };
+  box.querySelectorAll('#dt-s-chips .dt-chip').forEach(chip => { chip.onclick = () => { box.querySelectorAll('#dt-s-chips .dt-chip').forEach(c => c.classList.remove('active')); chip.classList.add('active'); activeChipServer = chip.dataset.chip; saveCurrentPrefs(); renderServers(); }; });
+  // ⚙️ Settings en masse (modifie tous les serveurs sélectionnés)
+  $('dt-s-bulk-settings').onclick = async () => {
+    if (busy || selectedServers.size === 0) return;
+    const targets = servers.filter(s => selectedServers.has(s.id));
+    const n = targets.length;
+    
+    // On crée un faux serveur avec les valeurs par défaut pour ouvrir la modale
+    const dummyServer = { 
+      name: `${n} selected server${n > 1 ? 's' : ''}`, 
+      created: new Date(), 
+      muted: false, mutedUntil: null, 
+      notifications: 0, 
+      suppressEveryone: false, 
+      suppressRoles: false, 
+      mobilePush: true 
+    };
+    
+    const newState = await openServerSettingsModal(dummyServer);
+    if (!newState) return;
+    
+    busy = true;
+    delBtn.disabled = true;
+    $('dt-s-mute-all').disabled = true;
+    $('dt-s-unmute-all').disabled = true;
+    $('dt-s-bulk-settings').disabled = true;
+    
+    let ok = 0, err = 0;
+    
+    for (const s of targets) {
+      if (!box.isConnected) break;
+      statusEl.textContent = `⚙️ Saving settings for ${s.name} (${ok + err + 1}/${n})…`;
+      
+      const settings = {
+        muted: newState.muted,
+        mute_config: newState.muted ? {
+          end_time: newState.muteDuration > 0 ? new Date(Date.now() + newState.muteDuration * 1000).toISOString() : null,
+          selected_time_window: newState.muteDuration,
+        } : null,
+        message_notifications: newState.notifications,
+        suppress_everyone: newState.suppressEveryone,
+        suppress_roles: newState.suppressRoles,
+        mobile_push: newState.mobilePush,
+      };
+      
+      const success = await updateGuildSettingsAPI(s.id, settings, ({ waitMs, attempt, max }) => {
+        statusEl.textContent = `🐢 Rate limited on ${s.name} — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s…`;
+      });
+      
+      if (success) {
+        applyGuildSettingsToServer(s, success);
+        ok++;
+      } else err++;
+      
+      await sleep(300);
+    }
+    
+    busy = false;
+    if (!box.isConnected) return;
+    
+    renderServers(true);
+    updateServerFooter(`⚙️ Settings done — ${ok}/${n} ok${err ? ` · ⚠️ ${err} err` : ''}`);
   };
 
-  // ════════════════════════════════════════════════════════
-  //  BULK ACTIONS (depend on active tab)
-  // ════════════════════════════════════════════════════════
-  delBtn.onclick = async () => {
-    if (busy) return;
-    if (activeTab === 'friends')     return bulkRemoveFriends();
-    if (activeTab === 'groups')      return bulkLeaveGroups();
-    if (activeTab === 'notfriends')  return bulkCleanNotFriends();
+  $('dt-s-mute-all').onclick = () => bulkMuteServers(true);
+  $('dt-s-unmute-all').onclick = () => bulkMuteServers(false);
+  $('dt-s-mute-all').onclick = () => bulkMuteServers(true); $('dt-s-unmute-all').onclick = () => bulkMuteServers(false);
+
+  // 🔄 Rescan manuel des settings serveurs (invalide le cache et relance)
+  $('dt-s-rescan').onclick = async () => {
+    if (busy || _sSettingsLoading) return;
+    busy = true;
+    const btn = $('dt-s-rescan');
+    btn.disabled = true;
+    btn.textContent = '…';
+
+    // Invalider le cache
+    Object.keys(guildSettingsCache).forEach(k => delete guildSettingsCache[k]);
+    saveGuildSettingsCache();
+
+    _sSettingsLoading = true;
+    _sSettingsDone = 0;
+    _sSettingsErr = 0;
+    _sSettingsTotal = servers.length;
+    renderServersProgress();
+
+    let _updateScheduled = false;
+    const scheduleUI = () => {
+      if (_updateScheduled) return;
+      _updateScheduled = true;
+      requestAnimationFrame(() => {
+        _updateScheduled = false;
+        if (_sSettingsFill) _sSettingsFill.style.width = `${Math.round((_sSettingsDone / _sSettingsTotal) * 100)}%`;
+        if (_sSettingsText) {
+          const errTxt = _sSettingsErr > 0 ? ` · ⚠️ ${_sSettingsErr} err` : '';
+          _sSettingsText.textContent = `${_sSettingsDone} / ${_sSettingsTotal}${errTxt}`;
+        }
+      });
+    };
+
+    try {
+      await pMap(servers, async (srv) => {
+        if (!box.isConnected) return;
+        const data = await readGuildSettings(srv.id);
+        if (data) applyGuildSettingsToServer(srv, data);
+        else _sSettingsErr++;
+        _sSettingsDone++;
+        scheduleUI();
+        await sleep(1000);
+      }, 2);
+    } finally {
+      _sSettingsLoading = false;
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = '🔄 Rescan';
+    }
+
+    if (box.isConnected) {
+      const top = sListEl.scrollTop;
+      renderServers(true);
+      sListEl.scrollTop = top;
+    }
+    const okCount = _sSettingsDone - _sSettingsErr;
+    updateServerFooter(`✅ Rescan done — ${okCount}/${_sSettingsTotal} OK${_sSettingsErr ? ` · ⚠️ ${_sSettingsErr} err` : ''}`);
   };
+
+  async function bulkMuteServers(mute) {
+    if (busy || selectedServers.size === 0) return;
+    const targets = servers.filter(s => selectedServers.has(s.id));
+    const n = targets.length;
+    const v = await choiceDialog({ title: mute ? `🔕 Mute ${n} server${n > 1 ? 's' : ''}?` : `🔔 Unmute ${n} server${n > 1 ? 's' : ''}?`, message: mute ? `Selected will be muted <b>forever</b>.` : `Selected will be unmuted.`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: mute ? '🔕 Mute' : '🔔 Unmute', value: 'go', danger: mute }] });
+    if (v !== 'go') return;
+    busy = true; delBtn.disabled = true; $('dt-s-mute-all').disabled = true; $('dt-s-unmute-all').disabled = true;
+    let ok = 0, err = 0;
+    
+    try {
+      for (const s of targets) {
+        if (!box.isConnected) break;
+        statusEl.textContent = `${mute ? '🔕 Muting' : '🔔 Unmuting'} ${s.name} (${ok + err + 1}/${n})…`;
+        const settings = mute ? { muted: true, mute_config: { end_time: null, selected_time_window: -1 } } : { muted: false };
+        
+        const success = await updateGuildSettingsAPI(s.id, settings, ({ waitMs, attempt, max }) => {
+          statusEl.textContent = `🐢 Rate limited on ${s.name} — retry ${attempt}/${max} in ${(waitMs/1000).toFixed(1)}s…`;
+        });
+        
+        if (success) { applyGuildSettingsToServer(s, success); ok++; } else err++;
+        await sleep(300);
+      }
+    } finally {
+      busy = false;
+      if (!box.isConnected) return;
+      renderServers(true);
+      updateServerFooter(`${mute ? '🔕 Mute' : '🔔 Unmute'} done — ${ok}/${n} ok${err ? ` · ⚠️ ${err} err` : ''}`);
+    }
+  }
+
+  async function bulkLeaveServers() {
+    if (busy || selectedServers.size === 0) return;
+    const targets = servers.filter(s => selectedServers.has(s.id));
+    const n = targets.length;
+    const v = await choiceDialog({ title: `Leave ${n} server${n > 1 ? 's' : ''}?`, message: `You're about to leave.<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🚪 Leave all', value: 'go', danger: true }] });
+    if (v !== 'go') return;
+    busy = true; delBtn.disabled = true; $('dt-s-mute-all').disabled = true; $('dt-s-unmute-all').disabled = true;
+    const progress = createProgressOverlay('server'); progress.setGlobal(0, n, '', 0);
+    let left = 0, err = 0, cancelledMidway = false;
+    for (const s of targets) {
+      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; }
+      progress.setGlobal(left, n, s.name, err);
+      const ok = await leaveGuildAPI(s.id);
+      if (ok) { left++; pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); servers = servers.filter(x => x.id !== s.id); selectedServers.delete(s.id); } else err++;
+      progress.setGlobal(left, n, '', err); await sleep(600 + Math.random() * 200);
+    }
+    const wasCancelled = progress.isCancelled() || cancelledMidway; progress.finish(left, n, err, wasCancelled); busy = false; if (!box.isConnected) return;
+    renderServers(true); updateServerFooter(`${wasCancelled ? '⛔ Cancelled' : '✅ Done'} — ${left} left${err ? ` · ⚠️ ${err} err` : ''}`);
+  }
+
+  // ════════════════════════════════════════════════════════
+  //  HISTORY TAB
+  // ════════════════════════════════════════════════════════
+  const historyRowHtml = h => {
+    const isGroup = h.kind === 'group', isNotFriend = h.kind === 'notfriend', isServer = h.kind === 'server';
+    const name = isGroup || isServer ? h.name : (h.global_name || h.username);
+    const sub = (isGroup || isServer || isNotFriend) ? null : `@${h.username}`;
+    const tags = [];
+    if (isServer) { tags.push(`<span class="dt-hist-tag server">🌐 Server</span>`); if (h.owner) tags.push(`<span class="dt-hist-tag orange">👑 Owned</span>`); if (h.wasMuted) tags.push(`<span class="dt-hist-tag grey">🔕 Muted</span>`); if (h.notifications === 2) tags.push(`<span class="dt-hist-tag grey">🔕 Nothing</span>`); else if (h.notifications === 1) tags.push(`<span class="dt-hist-tag">📢 Mentions</span>`); }
+    else if (isGroup) { tags.push(`<span class="dt-hist-tag group">👥 Group</span>`); if (h.msgDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.msgDeleted} msg</span>`); else tags.push(`<span class="dt-hist-tag grey">Kept</span>`); tags.push(h.silent ? `<span class="dt-hist-tag">🔇 silent</span>` : `<span class="dt-hist-tag orange">🔔 notified</span>`); tags.push(`<span class="dt-hist-tag grey">👥 ${h.size} member${h.size > 1 ? 's' : ''}</span>`); }
+    else if (isNotFriend) { if (h.dmDeleted > 0) { tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`); tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg</span>`); if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); } else { if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); else tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`); } }
+    else { tags.push(`<span class="dt-hist-tag friend">👤 Friend</span>`); if (h.dmDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg</span>`); else if (h.cleaned) tags.push(`<span class="dt-hist-tag green">🧹 Cleaned</span>`); else tags.push(`<span class="dt-hist-tag grey">Kept</span>`); if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); if (h.friendSince) tags.push(`<span class="dt-hist-tag orange" title="${fmtDateTime(h.friendSince)}">📅 ${fmtTsRelative(h.friendSince)}</span>`); }
+    const av = (isGroup || isServer) ? (h.iconUrl ? `<img class="dt-av" style="cursor:default" loading="lazy" src="${h.iconUrl}" onerror="this.style.opacity=.4">` : `<div class="dt-av dt-av-ph ${isGroup && h.solo ? 'solo' : ''}" style="cursor:default">${isServer ? esc((h.name[0] || '?').toUpperCase()) : '👥'}</div>`) : `<div class="dt-av-wrap" style="width:40px;height:40px"><svg class="dt-av-svg" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><foreignObject x="0" y="0" width="40" height="40" mask="url(#svg-mask-avatar-status-round-80)"><img src="${h.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></foreignObject></svg></div>`;
+    const ts = h.removedAt || h.leftAt; const action = isServer ? 'Left' : isGroup ? 'Left' : (isNotFriend ? 'Cleaned' : 'Removed');
+    const actions = (isGroup || isServer) ? '' : `<button class="dt-dm dt-h-view" title="Profile"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>`;
+    return `<div class="dt-row dt-hrow" data-id="${h.id}" data-kind="${h.kind}">${av}<div class="dt-info"><div class="dt-name" style="cursor:default;text-decoration:none">${esc(name)}${sub ? `<span>${esc(sub)}</span>` : ''}</div><div class="dt-hist-meta">${tags.join('')}</div><div class="dt-hist-date">${action} ${fmtTsRelative(ts)} · ${fmtDateTime(ts)}</div></div><div class="dt-actions">${actions}</div></div>`;
+  };
+  function renderHistory() {
+    const hq = $('dt-hq').value.trim().toLowerCase(), hf = $('dt-hfilter').value;
+    const list = history.filter(h => { if (hf !== 'all' && h.kind !== hf) return false; if (!hq) return true; const name = h.kind === 'group' || h.kind === 'server' ? h.name : `${h.username} ${h.global_name || ''}`; return `${name} ${h.id}`.toLowerCase().includes(hq); });
+    hListEl.innerHTML = list.length ? list.map(historyRowHtml).join('') : `<div class="dt-empty">${history.length === 0 ? 'No history.' : 'No matches.'}</div>`;
+    $('dt-hcount').textContent = history.length;
+    const totalMsg = history.reduce((s, h) => s + (h.dmDeleted || h.msgDeleted || 0), 0), friendCount = history.filter(h => h.kind === 'friend').length, groupCount = history.filter(h => h.kind === 'group').length, nfCount = history.filter(h => h.kind === 'notfriend').length, srvCount = history.filter(h => h.kind === 'server').length;
+    $('dt-hstats').textContent = history.length > 0 ? `${friendCount}👤 · ${groupCount}👥 · ${nfCount}💬 · ${srvCount}🌐 · 🧹 ${totalMsg}` : '';
+  }
+  hListEl.addEventListener('click', e => { const row = e.target.closest('.dt-row'); if (!row) return; const id = row.dataset.id, kind = row.dataset.kind; if ((kind === 'friend' || kind === 'notfriend') && e.target.closest('.dt-h-view, .dt-av, .dt-name')) openProfile(id); });
+  $('dt-hq').addEventListener('input', renderHistory); $('dt-hfilter').addEventListener('change', renderHistory);
+  $('dt-hclear').onclick = async () => { if (history.length === 0) return; const v = await choiceDialog({ title: 'Clear history?', message: `Clear <b>${history.length}</b> entries?<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🗑 Clear', value: 'clear', danger: true }] }); if (v === 'clear') { clearHistory(); renderHistory(); } };
+
+  // ════════════════════════════════════════════════════════
+  //  BULK ACTIONS (FRIENDS, GROUPS, NOT FRIENDS)
+  // ════════════════════════════════════════════════════════
+  delBtn.onclick = async () => { if (busy) return; if (activeTab === 'friends') return bulkRemoveFriends(); if (activeTab === 'groups') return bulkLeaveGroups(); if (activeTab === 'notfriends') return bulkCleanNotFriends(); if (activeTab === 'servers') return bulkLeaveServers(); };
 
   async function bulkRemoveFriends() {
-    if (!selectedFriends.size) return;
-    const targets = friends.filter(f => selectedFriends.has(f.id));
-    const n = targets.length;
-    busy = true; delBtn.disabled = true;
-
-    statusEl.textContent = `🔍 Checking your messages in ${n} DM(s)…`;
-    const checkedTargets = [];
-    let totalMsgCount = 0;
-    for (const f of targets) {
-      let channelId = null;
-      try { channelId = await resolveDMChannel(f.id); } catch {}
-      let count = 0;
-      if (channelId) count = await quickCountMyMessages(channelId);
-      totalMsgCount += count;
-      checkedTargets.push({ friend: f, msgCount: count, channelId });
-    }
-    busy = false;
-    if (!box.isConnected) return;
-
-    const action = await askFriendChoice({ count: n, totalMsgCount });
-    if (action === 'cancel') { updateFriendFooter(); return; }
-    const doClean = action === 'clean';
-
-    busy = true; delBtn.disabled = true;
-    const progress = createProgressOverlay('remove');
-    progress.setGlobal(0, n, '', 0);
-
-    let okCount = 0, errCount = 0, dmDeletedTotal = 0, closedCount = 0;
-    let skippedDueToCleanErrors = 0, cancelledMidway = false;
-    const startTime = Date.now();
-
+    if (!selectedFriends.size) return; const targets = friends.filter(f => selectedFriends.has(f.id)), n = targets.length; busy = true; delBtn.disabled = true; statusEl.textContent = `🔍 Checking ${n} DM(s)…`;
+    const checkedTargets = []; let totalMsgCount = 0;
+    for (const f of targets) { let channelId = null; try { channelId = await resolveDMChannel(f.id); } catch {} let count = 0; if (channelId) count = await quickCountMyMessages(channelId); totalMsgCount += count; checkedTargets.push({ friend: f, msgCount: count, channelId }); }
+    busy = false; if (!box.isConnected) return; const action = await askFriendChoice({ count: n, totalMsgCount }); if (action === 'cancel') { updateFriendFooter(); return; }
+    const doClean = action === 'clean'; busy = true; delBtn.disabled = true; const progress = createProgressOverlay('remove'); progress.setGlobal(0, n, '', 0);
+    let okCount = 0, errCount = 0, dmDeletedTotal = 0, closedCount = 0, skippedDueToCleanErrors = 0, cancelledMidway = false; const startTime = Date.now();
     for (const { friend: f, channelId } of checkedTargets) {
-      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; }
-      const fname = displayName(f.user);
-      let dmResult = null;
-
-      if (doClean) {
-        // Pass a wrapper that redirects updates to the secondary bar
-        const cleanProgress = {
-          setMode: (m) => progress.setMode(m),
-          update: (done, total, name, err) => {
-            progress.setCleanProgress(done, total, fname, err);
-          },
-          setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max),
-          clearRateLimit: () => progress.clearRateLimit(),
-          isCancelled: () => progress.isCancelled(),
-        };
-        try { dmResult = await cleanDMWithFriend(f, cleanProgress); } catch {}
-        progress.setCleanProgress(0, 0, '', 0);
-      }
+      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; } const fname = displayName(f.user); let dmResult = null;
+      if (doClean) { const cleanProgress = { setMode: (m) => progress.setMode(m), update: (done, total, name, err) => progress.setCleanProgress(done, total, fname, err), setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max), clearRateLimit: () => progress.clearRateLimit(), isCancelled: () => progress.isCancelled() }; try { dmResult = await cleanDMWithFriend(f, cleanProgress); } catch {} progress.setCleanProgress(0, 0, '', 0); }
       if (dmResult?.cancelled) { skippedDueToCleanErrors++; cancelledMidway = true; break; }
-
-      if (dmResult && dmResult.errors > 0) {
-        const choice = await choiceDialog({
-          title: `Clean failed for ${esc(fname)}`,
-          message: `<b style="color:#fff">${dmResult.deleted}/${dmResult.total}</b> deleted — <b style="color:#faa61a">${dmResult.errors} error${dmResult.errors > 1 ? 's' : ''}</b>.<br><br>
-                    Still remove <b style="color:#fff">${esc(fname)}</b>?`,
-          choices: [
-            { label: '⏭ Skip this one',  value: 'skip' },
-            { label: '🗑 Remove anyway', value: 'remove', danger: true },
-          ],
-        });
-        if (choice !== 'remove') { skippedDueToCleanErrors++; continue; }
-      }
-      if (dmResult?.deleted) dmDeletedTotal += dmResult.deleted;
-
-      progress.setMode('remove');
-      progress.setGlobal(okCount, n, fname, errCount);
-      try {
-        const ok = await removeFriendAPI(f.id, ({ waitMs, attempt, max }) => {
-          progress.setRateLimit(waitMs, attempt, max);
-        });
-        progress.clearRateLimit();
-        if (ok) {
-          okCount++;
-          let dmClosed = false;
-          if (channelId) { dmClosed = await closeDMChannel(channelId); if (dmClosed) closedCount++; }
-          pushHistory({
-            kind: 'friend', id: f.id, username: f.user.username, global_name: f.user.global_name || null,
-            avatarUrl: avatarUrl(f.user), removedAt: Date.now(),
-            cleaned: !!(dmResult?.deleted || dmResult?.total), dmDeleted: dmResult?.deleted || 0,
-            dmClosed, friendSince: f.since ? f.since.getTime() : null,
-          });
-          friends = friends.filter(x => x.id !== f.id);
-          friendIds.delete(f.id);
-          selectedFriends.delete(f.id);
-          dmChannelByUserId.delete(f.id);
-        } else errCount++;
-      } catch { errCount++; }
-      // Update the bar AFTER incrementing counters
-      progress.setGlobal(okCount, n, '', errCount);
-      await sleep((errCount > 0 ? 1400 : 900) + Math.random() * 400);
+      if (dmResult && dmResult.errors > 0) { const choice = await choiceDialog({ title: `Errors`, message: `<b>${dmResult.errors}</b> errors. Still remove?`, choices: [{ label: '⏭ Skip', value: 'skip' }, { label: '🗑 Remove anyway', value: 'remove', danger: true }] }); if (choice !== 'remove') { skippedDueToCleanErrors++; continue; } }
+      if (dmResult?.deleted) dmDeletedTotal += dmResult.deleted; progress.setMode('remove'); progress.setGlobal(okCount, n, fname, errCount);
+      try { const ok = await removeFriendAPI(f.id, ({ waitMs, attempt, max }) => progress.setRateLimit(waitMs, attempt, max)); progress.clearRateLimit(); if (ok) { okCount++; let dmClosed = false; if (channelId) { dmClosed = await closeDMChannel(channelId); if (dmClosed) closedCount++; } pushHistory({ kind: 'friend', id: f.id, username: f.user.username, global_name: f.user.global_name || null, avatarUrl: avatarUrl(f.user), removedAt: Date.now(), cleaned: !!(dmResult?.deleted || dmResult?.total), dmDeleted: dmResult?.deleted || 0, dmClosed, friendSince: f.since ? f.since.getTime() : null }); friends = friends.filter(x => x.id !== f.id); friendIds.delete(f.id); selectedFriends.delete(f.id); dmChannelByUserId.delete(f.id); } else errCount++; } catch { errCount++; }
+      progress.setGlobal(okCount, n, '', errCount); await sleep((errCount > 0 ? 1400 : 900) + Math.random() * 400);
     }
-
-    progress.finish(okCount, n, errCount, progress.isCancelled() || cancelledMidway);
-    busy = false;
-    if (!box.isConnected) return;
+    progress.finish(okCount, n, errCount, progress.isCancelled() || cancelledMidway); busy = false; if (!box.isConnected) return;
     const top = fListEl.scrollTop; renderFriends(); fListEl.scrollTop = top;
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    const bits = [`${okCount} removed`];
-    if (errCount) bits.push(`${errCount} error(s)`);
-    if (skippedDueToCleanErrors) bits.push(`${skippedDueToCleanErrors} skipped`);
-    if (doClean && dmDeletedTotal > 0) bits.push(`🧹 ${dmDeletedTotal} DM msg deleted`);
-    if (closedCount > 0) bits.push(`👋 ${closedCount} DM closed`);
-    updateFriendFooter(`${progress.isCancelled() || cancelledMidway ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')} in ${elapsed}s.`);
+    const bits = [`${okCount} removed`]; if (errCount) bits.push(`${errCount} err`); if (skippedDueToCleanErrors) bits.push(`${skippedDueToCleanErrors} skip`); if (doClean && dmDeletedTotal > 0) bits.push(`🧹 ${dmDeletedTotal} msg`); if (closedCount > 0) bits.push(`👋 ${closedCount} closed`);
+    updateFriendFooter(`${progress.isCancelled() || cancelledMidway ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')}.`);
   }
 
   async function bulkLeaveGroups() {
-    if (!selectedGroups.size) return;
-    const targets = groups.filter(g => selectedGroups.has(g.id));
-    const n = targets.length;
-    busy = true; delBtn.disabled = true;
-
-    let totalMsgCount = 0;
-    for (let i = 0; i < n; i++) {
-      statusEl.textContent = `🔍 Checking your messages… ${i + 1}/${n}`;
-      totalMsgCount += await quickCountMyMessages(targets[i].id);
-    }
-    busy = false;
-    if (!box.isConnected) return;
-
-    const action = await askGroupChoice({ count: n, totalMsgCount });
-    if (action === 'cancel') { updateGroupFooter(); return; }
-    const doClean = action === 'clean';
-    const silent = silentCb.checked;
-
-    busy = true; delBtn.disabled = true;
-    const progress = createProgressOverlay('leave', silent);
-    progress.setGlobal(0, n, '', 0);
-
-    let left = 0, errors = 0, skipped = 0, msgsDeleted = 0, cancelledMidway = false;
-    const startTime = Date.now();
-
+    if (!selectedGroups.size) return; const targets = groups.filter(g => selectedGroups.has(g.id)), n = targets.length; busy = true; delBtn.disabled = true;
+    let totalMsgCount = 0; for (let i = 0; i < n; i++) { statusEl.textContent = `🔍 Checking… ${i + 1}/${n}`; totalMsgCount += await quickCountMyMessages(targets[i].id); }
+    busy = false; if (!box.isConnected) return; const action = await askGroupChoice({ count: n, totalMsgCount }); if (action === 'cancel') { updateGroupFooter(); return; }
+    const doClean = action === 'clean', silent = silentCb.checked; busy = true; delBtn.disabled = true; const progress = createProgressOverlay('leave', silent); progress.setGlobal(0, n, '', 0);
+    let left = 0, errors = 0, skipped = 0, msgsDeleted = 0, cancelledMidway = false; const startTime = Date.now();
     for (const g of targets) {
-      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; }
-      let res = null;
-      if (doClean) {
-        progress.setMode('clean');
-        progress.setGlobal(left, n, `🔍 ${g.name}`, errors);
-        const cleanProgress = {
-          setMode: (m) => progress.setMode(m),
-          update: (done, total, name, err) => {
-            progress.setCleanProgress(done, total, g.name, err);
-          },
-          setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max),
-          clearRateLimit: () => progress.clearRateLimit(),
-          isCancelled: () => progress.isCancelled(),
-        };
-        try { res = await cleanGroupMessages(g, cleanProgress); } catch {}
-        progress.setCleanProgress(0, 0, '', 0);
-        progress.clearRateLimit();
-
-        if (res?.cancelled) { skipped++; cancelledMidway = true; break; }
-
-        if (res && res.errors > 0) {
-          const choice = await choiceDialog({
-            title: `Clean failed for ${g.name}`,
-            message: `<b style="color:#fff">${res.deleted}/${res.total}</b> deleted — <b style="color:#faa61a">${res.errors} error${res.errors > 1 ? 's' : ''}</b>.<br><br>
-                      Still leave <b style="color:#fff">${esc(g.name)}</b>?`,
-            choices: [
-              { label: '⏭ Skip this one', value: 'skip'  },
-              { label: '🚪 Leave anyway', value: 'leave', danger: true },
-            ],
-          });
-          if (choice !== 'leave') { skipped++; continue; }
-        }
-        msgsDeleted += res?.deleted ?? 0;
-      }
-
-      progress.setMode('leave');
-      progress.setGlobal(left, n, g.name, errors);
-
-      if (await leaveGroupAPI(g, silent)) {
-        left++;
-        logLeftGroup(g, { deleted: res?.deleted ?? 0, silent });
-        groups = groups.filter(x => x.id !== g.id);
-        selectedGroups.delete(g.id);
-      } else errors++;
-      // Update the bar AFTER incrementing counters
-      progress.setGlobal(left, n, '', errors);
-      await sleep(600 + Math.random() * 200);
+      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; } let res = null;
+      if (doClean) { progress.setMode('clean'); progress.setGlobal(left, n, `🔍 ${g.name}`, errors); const cleanProgress = { setMode: (m) => progress.setMode(m), update: (done, total, name, err) => progress.setCleanProgress(done, total, g.name, err), setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max), clearRateLimit: () => progress.clearRateLimit(), isCancelled: () => progress.isCancelled() }; try { res = await cleanGroupMessages(g, cleanProgress); } catch {} progress.setCleanProgress(0, 0, '', 0); progress.clearRateLimit(); if (res?.cancelled) { skipped++; cancelledMidway = true; break; } if (res && res.errors > 0) { const choice = await choiceDialog({ title: `Errors`, message: `<b>${res.errors}</b> errors. Still leave?`, choices: [{ label: '⏭ Skip', value: 'skip' }, { label: '🚪 Leave anyway', value: 'leave', danger: true }] }); if (choice !== 'leave') { skipped++; continue; } } msgsDeleted += res?.deleted ?? 0; }
+      progress.setMode('leave'); progress.setGlobal(left, n, g.name, errors); if (await leaveGroupAPI(g, silent)) { left++; logLeftGroup(g, { deleted: res?.deleted ?? 0, silent }); groups = groups.filter(x => x.id !== g.id); selectedGroups.delete(g.id); } else errors++;
+      progress.setGlobal(left, n, '', errors); await sleep(600 + Math.random() * 200);
     }
-
-    const wasCancelled = progress.isCancelled() || cancelledMidway;
-    progress.setMode('leave');
-    progress.finish(left, n, errors, wasCancelled);
-    busy = false;
-    if (!box.isConnected) return;
+    const wasCancelled = progress.isCancelled() || cancelledMidway; progress.setMode('leave'); progress.finish(left, n, errors, wasCancelled); busy = false; if (!box.isConnected) return;
     const top = gListEl.scrollTop; renderGroups(); gListEl.scrollTop = top;
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const bits = [`${left} left`];
-    if (errors) bits.push(`${errors} error(s)`);
-    if (skipped) bits.push(`${skipped} skipped`);
-    if (doClean && msgsDeleted > 0) bits.push(`🧹 ${msgsDeleted} msg deleted`);
-    updateGroupFooter(`${wasCancelled ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')} in ${elapsed}s.`);
+    const bits = [`${left} left`]; if (errors) bits.push(`${errors} err`); if (skipped) bits.push(`${skipped} skip`); if (doClean && msgsDeleted > 0) bits.push(`🧹 ${msgsDeleted} msg`);
+    updateGroupFooter(`${wasCancelled ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')}.`);
   }
 
   async function bulkCleanNotFriends() {
-    if (!selectedNotFriends.size) return;
-    const targets = notFriends.filter(n => selectedNotFriends.has(n.id));
-    const n = targets.length;
-
-    const v = await choiceDialog({
-      title: `Clean ${n} conversation${n > 1 ? 's' : ''}?`,
-      message: `You're about to <b style="color:#fff">delete all your messages</b> in these ${n} DM(s) with non-friends, and <b style="color:#fff">close</b> them.<br><br>
-                <span style="color:#faa61a">⚠️ This cannot be undone.</span>`,
-      choices: [
-        { label: 'Cancel',           value: 'cancel' },
-        { label: '🧹 Clean + close', value: 'go', danger: true },
-      ],
-    });
-    if (v !== 'go') return;
-
-    busy = true; delBtn.disabled = true;
-    const progress = createProgressOverlay('clean');
-    progress.setGlobal(0, n, '', 0);
-
-    let ok = 0, errors = 0, msgsDeleted = 0, closedCount = 0, cancelledMidway = false;
-    const startTime = Date.now();
-
+    if (!selectedNotFriends.size) return; const targets = notFriends.filter(n => selectedNotFriends.has(n.id)), n = targets.length;
+    const v = await choiceDialog({ title: `Clean ${n} DM(s)?`, message: `Delete your messages and <b>close</b> them.<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🧹 Clean + close', value: 'go', danger: true }] }); if (v !== 'go') return;
+    busy = true; delBtn.disabled = true; const progress = createProgressOverlay('clean'); progress.setGlobal(0, n, '', 0);
+    let ok = 0, errors = 0, msgsDeleted = 0, closedCount = 0, cancelledMidway = false; const startTime = Date.now();
     for (const nf of targets) {
-      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; }
-      const name = displayName(nf.user);
-
-      progress.setMode('clean');
-      progress.setGlobal(ok, n, `🔍 ${name}`, errors);
-
-      let res = null;
-      const cleanProgress = {
-        setMode: (m) => progress.setMode(m),
-        update: (done, total, n, err) => {
-          progress.setCleanProgress(done, total, name, err);
-        },
-        setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max),
-        clearRateLimit: () => progress.clearRateLimit(),
-        isCancelled: () => progress.isCancelled(),
-      };
-      try { res = await cleanChannelMessages({ id: nf.channelId }, cleanProgress, name); }
-      catch (e) { console.warn(e); }
-      progress.setCleanProgress(0, 0, '', 0);
-      progress.clearRateLimit();
-      if (res?.cancelled) { cancelledMidway = true; break; }
-      if (res?.errors > 0) errors++;
-      msgsDeleted += res?.deleted ?? 0;
-
-      const closed = await closeDMChannel(nf.channelId);
-      if (closed) closedCount++;
-      dmChannelByUserId.delete(nf.id);
-
-      pushHistory({
-        kind: 'notfriend',
-        id: nf.id,
-        username: nf.user.username,
-        global_name: nf.user.global_name || null,
-        avatarUrl: avatarUrl(nf.user),
-        removedAt: Date.now(),
-        dmDeleted: res?.deleted || 0,
-        dmClosed: closed,
-      });
-
-      notFriends = notFriends.filter(x => x.id !== nf.id);
-      selectedNotFriends.delete(nf.id);
-      ok++;
-
-      progress.setGlobal(ok, n, '', errors);
-      await sleep(500 + Math.random() * 200);
+      if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; } const name = displayName(nf.user);
+      progress.setMode('clean'); progress.setGlobal(ok, n, `🔍 ${name}`, errors); let res = null;
+      const cleanProgress = { setMode: (m) => progress.setMode(m), update: (done, total, n, err) => progress.setCleanProgress(done, total, name, err), setRateLimit: (waitMs, attempt, max) => progress.setRateLimit(waitMs, attempt, max), clearRateLimit: () => progress.clearRateLimit(), isCancelled: () => progress.isCancelled() };
+      try { res = await cleanChannelMessages({ id: nf.channelId }, cleanProgress, name); } catch {} progress.setCleanProgress(0, 0, '', 0); progress.clearRateLimit(); if (res?.cancelled) { cancelledMidway = true; break; } if (res?.errors > 0) errors++; msgsDeleted += res?.deleted ?? 0; const closed = await closeDMChannel(nf.channelId); if (closed) closedCount++; dmChannelByUserId.delete(nf.id);
+      pushHistory({ kind: 'notfriend', id: nf.id, username: nf.user.username, global_name: nf.user.global_name || null, avatarUrl: avatarUrl(nf.user), removedAt: Date.now(), dmDeleted: res?.deleted || 0, dmClosed: closed }); notFriends = notFriends.filter(x => x.id !== nf.id); selectedNotFriends.delete(nf.id); ok++;
+      progress.setGlobal(ok, n, '', errors); await sleep(500 + Math.random() * 200);
     }
-
-    const wasCancelled = progress.isCancelled() || cancelledMidway;
-    progress.setMode('clean');
-    progress.finish(ok, n, errors, wasCancelled);
-    busy = false;
-    if (!box.isConnected) return;
+    const wasCancelled = progress.isCancelled() || cancelledMidway; progress.setMode('clean'); progress.finish(ok, n, errors, wasCancelled); busy = false; if (!box.isConnected) return;
     const top = nListEl.scrollTop; renderNotFriends(); nListEl.scrollTop = top;
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const bits = [`${ok} cleaned`];
-    if (errors) bits.push(`${errors} error(s)`);
-    if (msgsDeleted) bits.push(`🧹 ${msgsDeleted} msg deleted`);
-    if (closedCount) bits.push(`👋 ${closedCount} DM closed`);
-    updateNotFriendsFooter(`${wasCancelled ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')} in ${elapsed}s.`);
+    const bits = [`${ok} cleaned`]; if (errors) bits.push(`${errors} err`); if (msgsDeleted) bits.push(`🧹 ${msgsDeleted} msg`); if (closedCount) bits.push(`👋 ${closedCount} closed`);
+    updateNotFriendsFooter(`${wasCancelled ? '⛔ Cancelled' : '✅ Done'} — ${bits.join(', ')}.`);
   }
 
   // ── Initial render ──────────────────────────────────────
-  setLoadingStep('Building the interface', 95);
-  await sleep(60);
-  renderFriends();
-  renderGroups();
-  notFriendsScanState = 'idle';
-  if (activeTab === 'notfriends') renderNotFriendsProgress(); else renderNotFriends();
-  renderHistory();
-  applyTab();
+  setLoadingStep('Building the interface', 95); await sleep(60);
+  renderFriends(); renderGroups(); renderServers(); notFriendsScanState = 'idle'; if (activeTab === 'notfriends') renderNotFriendsProgress(); else renderNotFriends(); renderHistory(); applyTab();
+  setLoadingStep('Ready!', 100); setTimeout(() => hideLoadingModal(), 450); setTimeout(() => { if (box.isConnected) scanAllNotFriends(); }, 300);
 
-  setLoadingStep('Ready!', 100);
-  setTimeout(() => {
-    hideLoadingModal();
-  }, 450);
+  // 🔄 Background fetch — workers parallèles (4), progress comme Not Friends
+  (async () => {
+    const missing = servers.filter(s => !guildSettingsCache[s.id]).map(s => s.id);
+    if (missing.length === 0) {
+      console.log(`✅ Guild settings depuis cache (${servers.length} serveurs)`);
+      return;
+    }
+    console.log(`🔄 Scan guild settings: ${missing.length}/${servers.length} serveurs…`);
 
-  setTimeout(() => { if (box.isConnected) scanAllNotFriends(); }, 300);
+    _sSettingsLoading = true;
+    _sSettingsDone = 0;
+    _sSettingsErr = 0;
+    _sSettingsTotal = missing.length;
+    if (activeTab === 'servers') renderServersProgress();
 
-  console.log('%c✅ Discord Tools v1.3 ready — Friends · Groups · Not Friends · History', 'color:green;font-weight:bold;font-size:16px');
-  if (history.length > 0) console.log(`📜 ${history.length} entr${history.length > 1 ? 'ies' : 'y'} in universal history`);
+    let _updateScheduled = false;
+    const scheduleUI = () => {
+      if (_updateScheduled || activeTab !== 'servers') return;
+      _updateScheduled = true;
+      requestAnimationFrame(() => {
+        _updateScheduled = false;
+        if (_sSettingsFill) _sSettingsFill.style.width = `${Math.round((_sSettingsDone / _sSettingsTotal) * 100)}%`;
+        if (_sSettingsText) {
+          const errTxt = _sSettingsErr > 0 ? ` · ⚠️ ${_sSettingsErr} err` : '';
+          _sSettingsText.textContent = `${_sSettingsDone} / ${_sSettingsTotal}${errTxt}`;
+        }
+      });
+    };
+
+    try {
+      // 4 workers × 200ms = ~20 req/s max, apiFetch gère les 429
+      await pMap(missing, async (gid) => {
+        if (!box.isConnected) return;
+        const data = await readGuildSettings(gid);
+        if (data) {
+          const srv = servers.find(s => s.id === gid);
+          if (srv) applyGuildSettingsToServer(srv, data);
+        } else {
+          _sSettingsErr++;
+        }
+        _sSettingsDone++;
+        scheduleUI();
+        await sleep(1000);
+      }, 2);
+    } finally {
+      _sSettingsLoading = false;
+    }
+
+    const okCount = _sSettingsDone - _sSettingsErr;
+    console.log(`✅ Guild settings: ${okCount}/${_sSettingsTotal} OK${_sSettingsErr ? ` · ${_sSettingsErr} KO` : ''}`);
+
+    if (box.isConnected && activeTab === 'servers') {
+      const top = sListEl.scrollTop;
+      renderServers(true);
+      sListEl.scrollTop = top;
+    }
+  })();
+
+  console.log('%c✅ Discord Tools v1.4.6 ready — Fixed CORS on Canary/PTB', 'color:green;font-weight:bold;font-size:16px');
 };
 
 // Auto-run on first load
