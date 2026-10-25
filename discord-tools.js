@@ -341,7 +341,36 @@ window.__dt_run = async () => {
 
   async function removeFriendAPI(id, onWait) { const r = await apiFetch(`${BASE}/users/@me/relationships/${id}`, { method: 'DELETE' }, onWait); return r.status === 204 || r.status === 200; }
   async function leaveGroupAPI(group, silent = true) { const r = await apiFetch(`${BASE}/channels/${group.id}${silent ? '?silent=true' : ''}`, { method: "DELETE" }); return r.status === 200 || r.status === 204 || r.status === 404; }
-  async function leaveGuildAPI(guildId) { try { const r = await apiFetch(`${BASE}/users/@me/guilds/${guildId}`, { method: 'DELETE' }); return r.ok || r.status === 204; } catch { return false; } }
+async function leaveGuildAPI(guildId) {
+  try {
+    // On crée des headers spécifiques SANS le Content-Type pour cette requête DELETE
+    const deleteHeaders = { Authorization: TOKEN };
+    
+    // On fait le fetch directement au lieu d'utiliser apiFetch, 
+    // pour être sûr de ne pas envoyer de body
+    const r = await fetch(`${BASE}/users/@me/guilds/${guildId}`, { 
+      method: 'DELETE',
+      headers: deleteHeaders 
+    });
+
+    if (r.status === 204 || r.ok) return { success: true };
+    
+    // Gestion du rate limit (429) manuelle si besoin
+    if (r.status === 429) {
+        const body = await r.json().catch(() => ({}));
+        const waitMs = Math.ceil((body.retry_after ?? 1) * 1000 + 400);
+        await sleep(waitMs);
+        // On retente une fois après l'attente
+        return await leaveGuildAPI(guildId); 
+    }
+
+    const body = await r.json().catch(() => ({}));
+    console.error(`❌ Leave failed [${r.status}] for ${guildId}:`, body);
+    return { success: false, status: r.status, message: body.message || 'Unknown error' };
+  } catch (e) {
+    return { success: false, status: -1, message: e.message };
+  }
+}
 
   function choiceDialog({ title, message, choices }) {
     return new Promise(resolve => {
@@ -749,7 +778,22 @@ window.__dt_run = async () => {
       </div>
     </div>`;
   };
-  const updateFriendFooter = (msg) => { const sa = $('dt-f-selall'); if (sa) { const n = visibleFriends.filter(f => selectedFriends.has(f.id)).length; sa.checked = visibleFriends.length > 0 && n === visibleFriends.length; sa.indeterminate = n > 0 && n < visibleFriends.length; } $('dt-fcount').textContent = friends.length; if (activeTab === 'friends') { delBtn.disabled = busy || selectedFriends.size === 0; delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`; statusEl.textContent = msg ?? `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`; } };
+    const updateFriendFooter = (msg) => { 
+    const sa = $('dt-f-selall'); 
+    if (sa) { 
+      const n = visibleFriends.filter(f => selectedFriends.has(f.id)).length; 
+      sa.checked = visibleFriends.length > 0 && n === visibleFriends.length; 
+      sa.indeterminate = n > 0 && n < visibleFriends.length; 
+    } 
+    $('dt-fcount').textContent = friends.length; 
+    if (activeTab === 'friends') { 
+      delBtn.disabled = busy || selectedFriends.size === 0; 
+      delBtn.textContent = `🗑 Remove selected (${selectedFriends.size})`; 
+      if (!msg) statusEl.style.color = ''; // 👈 AJOUT ICI
+      statusEl.textContent = msg ?? `${visibleFriends.length} shown / ${friends.length} friend(s) · ${selectedFriends.size} selected`; 
+      if (msg) { clearTimeout(window._dt_toast_timer); window._dt_toast_timer = setTimeout(() => { if (activeTab === 'friends') updateFriendFooter(); }, 4000); }
+    } 
+  };
   let _lastFriendsHash = '';
   const renderFriends = (force = false) => { visibleFriends = getVisibleFriends(); const hash = visibleFriends.map(f => f.id + ':' + (selectedFriends.has(f.id) ? '1' : '0')).join(','); if (!force && hash === _lastFriendsHash) { updateFriendFooter(); refreshStatusDots(); return; } _lastFriendsHash = hash; fListEl.innerHTML = visibleFriends.length ? visibleFriends.map(friendRowHtml).join('') : `<div class="dt-empty">No friends match the filters.</div>`; updateFriendFooter(); refreshStatusDots(); };
 
@@ -821,7 +865,23 @@ window.__dt_run = async () => {
     const av = g.icon ? `<img class="dt-av" loading="lazy" src="${iconUrl(g)}" title="Open group">` : `<div class="dt-av dt-av-ph ${g.solo ? 'solo' : ''}" title="Open group">👥</div>`;
     return `<div class="dt-row ${selectedGroups.has(g.id) ? 'sel' : ''}" data-id="${g.id}"><input type="checkbox" class="dt-cb" ${selectedGroups.has(g.id) ? 'checked' : ''}>${av}<div class="dt-info"><div class="dt-name" title="Open group">${esc(g.name)}</div><div class="dt-sub">${g.size} member${g.size > 1 ? 's' : ''} · Created ${fmtDate(g.created)} (${fmtRelative(g.created)}) · Last activity ${g.last ? fmtRelative(g.last) : 'unknown'}</div></div><div class="dt-badges">${badges}</div><div class="dt-actions"><button class="dt-open" title="Open group"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button><button class="dt-rm" title="Leave (click twice)">🚪 Leave</button></div></div>`;
   };
-  const updateGroupFooter = (msg) => { const sa = $('dt-g-selall'); if (sa) { const n = visibleGroups.filter(g => selectedGroups.has(g.id)).length; sa.checked = visibleGroups.length > 0 && n === visibleGroups.length; sa.indeterminate = n > 0 && n < visibleGroups.length; } $('dt-gcount').textContent = groups.length; if (activeTab === 'groups') { delBtn.disabled = busy || selectedGroups.size === 0; delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`; const solo = groups.filter(g => g.solo).length; statusEl.textContent = msg ?? `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`; } };
+  const updateGroupFooter = (msg) => { 
+    const sa = $('dt-g-selall'); 
+    if (sa) { 
+      const n = visibleGroups.filter(g => selectedGroups.has(g.id)).length; 
+      sa.checked = visibleGroups.length > 0 && n === visibleGroups.length; 
+      sa.indeterminate = n > 0 && n < visibleGroups.length; 
+    } 
+    $('dt-gcount').textContent = groups.length; 
+    if (activeTab === 'groups') { 
+      delBtn.disabled = busy || selectedGroups.size === 0; 
+      delBtn.textContent = `🚪 Leave selected (${selectedGroups.size})`; 
+      const solo = groups.filter(g => g.solo).length; 
+      if (!msg) statusEl.style.color = ''; // 👈 AJOUT ICI
+      statusEl.textContent = msg ?? `${visibleGroups.length} shown / ${groups.length} group(s)${solo ? ` (${solo} solo)` : ''} · ${selectedGroups.size} selected`; 
+      if (msg) { clearTimeout(window._dt_toast_timer); window._dt_toast_timer = setTimeout(() => { if (activeTab === 'groups') updateGroupFooter(); }, 4000); }
+    } 
+  };
   const renderGroups = () => { visibleGroups = getVisibleGroups(); gListEl.innerHTML = visibleGroups.length ? visibleGroups.map(groupRowHtml).join('') : `<div class="dt-empty">${groups.length === 0 ? "No group DM 🎉" : 'No groups match.'}</div>`; updateGroupFooter(); };
 
   async function askGroupChoice({ count, totalMsgCount, individualName }) {
@@ -881,7 +941,22 @@ window.__dt_run = async () => {
     const u = n.user; const badges = badgesForNotFriend(n).map(b => `<span class="dt-badge" title="${esc(b.label)}" style="color:${b.color};background:${b.color}20;border:1px solid ${b.color}55">${b.icon}</span>`).join(''); const countTxt = n.count < 0 ? '…' : n.count;
     return `<div class="dt-row ${selectedNotFriends.has(n.id) ? 'sel' : ''}" data-id="${n.id}"><input type="checkbox" class="dt-cb" ${selectedNotFriends.has(n.id) ? 'checked' : ''}>${avatarWithStatus(u, 40)}<div class="dt-info"><div class="dt-name" title="View profile">${esc(displayName(u))}<span>@${esc(u.username)}</span></div><div class="dt-sub">💬 ${countTxt} message(s) from you · Last DM ${n.last ? fmtRelative(n.last) : 'unknown'} · Created ${fmtDate(n.created)}</div></div><div class="dt-badges">${badges}</div><div class="dt-actions"><button class="dt-dm" title="Open DM"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button><button class="dt-cl" title="Clean + close (click twice)">🧹 Clean</button></div></div>`;
   };
-  const updateNotFriendsFooter = (msg) => { const sa = $('dt-n-selall'); if (sa) { const k = visibleNotFriends.filter(n => selectedNotFriends.has(n.id)).length; sa.checked = visibleNotFriends.length > 0 && k === visibleNotFriends.length; sa.indeterminate = k > 0 && k < visibleNotFriends.length; } $('dt-ncount').textContent = notFriends.length; if (activeTab === 'notfriends') { delBtn.disabled = busy || selectedNotFriends.size === 0; delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`; statusEl.textContent = msg ?? `${visibleNotFriends.length} shown / ${notFriends.length} DM(s) · ${selectedNotFriends.size} selected`; } };
+  const updateNotFriendsFooter = (msg) => { 
+    const sa = $('dt-n-selall'); 
+    if (sa) { 
+      const k = visibleNotFriends.filter(n => selectedNotFriends.has(n.id)).length; 
+      sa.checked = visibleNotFriends.length > 0 && k === visibleNotFriends.length; 
+      sa.indeterminate = k > 0 && k < visibleNotFriends.length; 
+    } 
+    $('dt-ncount').textContent = notFriends.length; 
+    if (activeTab === 'notfriends') { 
+      delBtn.disabled = busy || selectedNotFriends.size === 0; 
+      delBtn.textContent = `🧹 Clean + close (${selectedNotFriends.size})`; 
+      if (!msg) statusEl.style.color = ''; // 👈 AJOUT ICI
+      statusEl.textContent = msg ?? `${visibleNotFriends.length} shown / ${notFriends.length} DM(s) · ${selectedNotFriends.size} selected`; 
+      if (msg) { clearTimeout(window._dt_toast_timer); window._dt_toast_timer = setTimeout(() => { if (activeTab === 'notfriends') updateNotFriendsFooter(); }, 4000); }
+    } 
+  };
   let _lastNotFriendsHash = '';
     const renderNotFriends = (force = false) => { 
     visibleNotFriends = getVisibleNotFriends(); 
@@ -984,17 +1059,23 @@ window.__dt_run = async () => {
     </div>`;
   };
   const updateServerFooter = (msg) => {
-    const sa = $('dt-s-selall'); if (sa) { const n = visibleServers.filter(s => selectedServers.has(s.id)).length; sa.checked = visibleServers.length > 0 && n === visibleServers.length; sa.indeterminate = n > 0 && n < visibleServers.length; } $('dt-scount').textContent = servers.length;
+    const sa = $('dt-s-selall'); 
+    if (sa) { 
+      const n = visibleServers.filter(s => selectedServers.has(s.id)).length; 
+      sa.checked = visibleServers.length > 0 && n === visibleServers.length; 
+      sa.indeterminate = n > 0 && n < visibleServers.length; 
+    } 
+    $('dt-scount').textContent = servers.length;
     if (activeTab === 'servers') { 
       delBtn.disabled = busy || selectedServers.size === 0; 
       delBtn.textContent = `🚪 Leave selected (${selectedServers.size})`; 
-      
-      // ✅ Ajoute cette ligne
       $('dt-s-bulk-settings').disabled = busy || selectedServers.size === 0;
-      
       $('dt-s-mute-all').disabled = busy || selectedServers.size === 0; 
       $('dt-s-unmute-all').disabled = busy || selectedServers.size === 0; 
-      const owned = servers.filter(s => s.owner).length; statusEl.textContent = msg ?? `${visibleServers.length} shown / ${servers.length} server(s)${owned ? ` (${owned} owned)` : ''} · ${selectedServers.size} selected`; 
+      const owned = servers.filter(s => s.owner).length; 
+      if (!msg) statusEl.style.color = ''; // 👈 AJOUT ICI
+      statusEl.textContent = msg ?? `${visibleServers.length} shown / ${servers.length} server(s)${owned ? ` (${owned} owned)` : ''} · ${selectedServers.size} selected`; 
+      if (msg) { clearTimeout(window._dt_toast_timer); window._dt_toast_timer = setTimeout(() => { if (activeTab === 'servers') updateServerFooter(); }, 4000); }
     }
   };
   let _lastServersHash = '';
@@ -1020,9 +1101,31 @@ window.__dt_run = async () => {
     if (busy) return; const s = servers.find(x => x.id === id); if (!s) return; busy = true; if (btn) { btn.classList.add('loading'); btn.textContent = '…'; }
     const v = await choiceDialog({ title: `Leave ${esc(s.name)}?`, message: `You're about to leave. ${s.owner ? '⚠️ You own this server!' : ''}<br><br><span style="color:#faa61a">⚠️ Cannot be undone.</span>`, choices: [{ label: 'Cancel', value: 'cancel' }, { label: '🚪 Leave', value: 'leave', danger: true }] });
     if (v !== 'leave') { busy = false; if (btn) { btn.classList.remove('loading'); btn.textContent = '🚪 Leave'; } if (box.isConnected) updateServerFooter(); return; }
-    statusEl.textContent = `🚪 Leaving…`; const ok = await leaveGuildAPI(s.id); busy = false; if (!box.isConnected) return;
-    if (ok) { pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); servers = servers.filter(x => x.id !== id); selectedServers.delete(id); if (row) { row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s'; row.style.opacity = '0'; row.style.transform = 'translateX(24px)'; row.style.maxHeight = row.offsetHeight + 'px'; requestAnimationFrame(() => { row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0'; row.style.borderBottom = 'none'; }); setTimeout(() => { const top = sListEl.scrollTop; renderServers(true); sListEl.scrollTop = top; updateServerFooter(`✅ Left.`); }, 260); } else { renderServers(true); updateServerFooter(`✅ Left.`); }
-    } else { if (btn) { btn.classList.remove('loading'); btn.classList.add('err'); btn.textContent = '✕ Failed'; } updateServerFooter(`⚠️ Failed.`); }
+    
+    statusEl.textContent = `🚪 Leaving…`; 
+    const res = await leaveGuildAPI(s.id); 
+    busy = false; 
+    if (!box.isConnected) return;
+
+    if (res.success) { 
+      pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); 
+      servers = servers.filter(x => x.id !== id); 
+      selectedServers.delete(id); 
+      if (row) { 
+        row.style.transition = 'opacity .25s, transform .25s, max-height .25s, padding .25s'; 
+        row.style.opacity = '0'; 
+        row.style.transform = 'translateX(24px)'; 
+        row.style.maxHeight = row.offsetHeight + 'px'; 
+        requestAnimationFrame(() => { row.style.maxHeight = '0'; row.style.paddingTop = '0'; row.style.paddingBottom = '0'; row.style.borderBottom = 'none'; }); 
+        setTimeout(() => { const top = sListEl.scrollTop; renderServers(true); sListEl.scrollTop = top; updateServerFooter(`✅ Left.`); }, 260); 
+      } else { 
+        renderServers(true); updateServerFooter(`✅ Left.`); 
+      }
+    } else { 
+      if (btn) { btn.classList.remove('loading'); btn.classList.add('err'); btn.textContent = '✕ Failed'; } 
+      // Affiche l'erreur exacte (ex: 400 Last member, 403 Missing permission...)
+      updateServerFooter(`⚠️ Failed: ${res.message} (${res.status})`); 
+    }
   }
 
   sListEl.addEventListener('click', async e => {
@@ -1205,8 +1308,18 @@ window.__dt_run = async () => {
     for (const s of targets) {
       if (progress.isCancelled() || !box.isConnected) { cancelledMidway = true; break; }
       progress.setGlobal(left, n, s.name, err);
-      const ok = await leaveGuildAPI(s.id);
-      if (ok) { left++; pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); servers = servers.filter(x => x.id !== s.id); selectedServers.delete(s.id); } else err++;
+      
+      const res = await leaveGuildAPI(s.id);
+      
+      if (res.success) { 
+        left++; 
+        pushHistory({ kind: 'server', id: s.id, name: s.name, iconUrl: serverIconUrl(s), owner: s.owner, wasMuted: s.muted, notifications: s.notifications, leftAt: Date.now(), createdTs: s.created.getTime() }); 
+        servers = servers.filter(x => x.id !== s.id); 
+        selectedServers.delete(s.id); 
+      } else { 
+        err++; 
+        console.warn(`Could not leave ${s.name}:`, res.message);
+      }
       progress.setGlobal(left, n, '', err); await sleep(600 + Math.random() * 200);
     }
     const wasCancelled = progress.isCancelled() || cancelledMidway; progress.finish(left, n, err, wasCancelled); busy = false; if (!box.isConnected) return;
@@ -1225,7 +1338,9 @@ window.__dt_run = async () => {
     else if (isGroup) { tags.push(`<span class="dt-hist-tag group">👥 Group</span>`); if (h.msgDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.msgDeleted} msg</span>`); else tags.push(`<span class="dt-hist-tag grey">Kept</span>`); tags.push(h.silent ? `<span class="dt-hist-tag">🔇 silent</span>` : `<span class="dt-hist-tag orange">🔔 notified</span>`); tags.push(`<span class="dt-hist-tag grey">👥 ${h.size} member${h.size > 1 ? 's' : ''}</span>`); }
     else if (isNotFriend) { if (h.dmDeleted > 0) { tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`); tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg</span>`); if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); } else { if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); else tags.push(`<span class="dt-hist-tag notfriend">💬 Not-friend</span>`); } }
     else { tags.push(`<span class="dt-hist-tag friend">👤 Friend</span>`); if (h.dmDeleted > 0) tags.push(`<span class="dt-hist-tag green">🧹 ${h.dmDeleted} msg</span>`); else if (h.cleaned) tags.push(`<span class="dt-hist-tag green">🧹 Cleaned</span>`); else tags.push(`<span class="dt-hist-tag grey">Kept</span>`); if (h.dmClosed) tags.push(`<span class="dt-hist-tag">👋 Closed</span>`); if (h.friendSince) tags.push(`<span class="dt-hist-tag orange" title="${fmtDateTime(h.friendSince)}">📅 ${fmtTsRelative(h.friendSince)}</span>`); }
-    const av = (isGroup || isServer) ? (h.iconUrl ? `<img class="dt-av" style="cursor:default" loading="lazy" src="${h.iconUrl}" onerror="this.style.opacity=.4">` : `<div class="dt-av dt-av-ph ${isGroup && h.solo ? 'solo' : ''}" style="cursor:default">${isServer ? esc((h.name[0] || '?').toUpperCase()) : '👥'}</div>`) : `<div class="dt-av-wrap" style="width:40px;height:40px"><svg class="dt-av-svg" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><foreignObject x="0" y="0" width="40" height="40" mask="url(#svg-mask-avatar-status-round-80)"><img src="${h.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block"></foreignObject></svg></div>`;
+    const av = (isGroup || isServer) 
+      ? (h.iconUrl ? `<img class="dt-av" style="cursor:default" loading="lazy" src="${h.iconUrl}" onerror="this.style.opacity=.4">` : `<div class="dt-av dt-av-ph ${isGroup && h.solo ? 'solo' : ''}" style="cursor:default">${isServer ? esc((h.name[0] || '?').toUpperCase()) : '👥'}</div>`) 
+      : `<img class="dt-av" src="${h.avatarUrl}" style="cursor:default" loading="lazy" alt="">`;
     const ts = h.removedAt || h.leftAt; const action = isServer ? 'Left' : isGroup ? 'Left' : (isNotFriend ? 'Cleaned' : 'Removed');
     const actions = (isGroup || isServer) ? '' : `<button class="dt-dm dt-h-view" title="Profile"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></button>`;
     return `<div class="dt-row dt-hrow" data-id="${h.id}" data-kind="${h.kind}">${av}<div class="dt-info"><div class="dt-name" style="cursor:default;text-decoration:none">${esc(name)}${sub ? `<span>${esc(sub)}</span>` : ''}</div><div class="dt-hist-meta">${tags.join('')}</div><div class="dt-hist-date">${action} ${fmtTsRelative(ts)} · ${fmtDateTime(ts)}</div></div><div class="dt-actions">${actions}</div></div>`;
